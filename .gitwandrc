@@ -1,0 +1,7 @@
+{
+  "secrets": {
+    "ignore": [
+      "justfile"
+    ]
+  }
+}
