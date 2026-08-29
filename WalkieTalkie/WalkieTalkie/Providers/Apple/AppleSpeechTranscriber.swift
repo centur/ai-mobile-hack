@@ -1,8 +1,14 @@
 @preconcurrency import AVFAudio
 import Foundation
+import OSLog
 import Speech
 
 actor AppleSpeechTranscriber: SpeechTranscribing {
+    nonisolated private static let logger = Logger(
+        subsystem: "SharpOps.WalkieTalkie",
+        category: "SpeechModelInventory"
+    )
+
     private enum Backend {
         case speech(Locale)
         case dictation(Locale)
@@ -14,12 +20,27 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     private var resultsTask: Task<Void, Never>?
 
     func supportedLanguages() async -> [Language] {
-        var locales = await DictationTranscriber.supportedLocales
+        let dictationLocales = await DictationTranscriber.supportedLocales
+        let speechLocales = SpeechTranscriber.isAvailable
+            ? await SpeechTranscriber.supportedLocales
+            : []
+        var locales = dictationLocales
         if SpeechTranscriber.isAvailable {
-            locales.append(contentsOf: await SpeechTranscriber.supportedLocales)
+            locales.append(contentsOf: speechLocales)
         }
         let languages = locales.compactMap(Self.baseLanguage)
-        return Self.sortedUnique(languages)
+        let supported = Self.sortedUnique(languages)
+
+        Self.logger.debug(
+            "SpeechTranscriber locales: \(Self.identifiers(speechLocales), privacy: .public)"
+        )
+        Self.logger.debug(
+            "DictationTranscriber locales: \(Self.identifiers(dictationLocales), privacy: .public)"
+        )
+        Self.logger.debug(
+            "Merged model languages: \(supported.map { $0.identifier }.joined(separator: ", "), privacy: .public)"
+        )
+        return supported
     }
 
     func installedLanguages() async -> [Language] {
@@ -379,6 +400,10 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         Array(Set(languages)).sorted {
             $0.displayName().localizedCaseInsensitiveCompare($1.displayName()) == .orderedAscending
         }
+    }
+
+    private nonisolated static func identifiers(_ locales: [Locale]) -> String {
+        locales.map { $0.identifier(.bcp47) }.sorted().joined(separator: ", ")
     }
 
     private nonisolated static func makeBuffer(
