@@ -19,7 +19,8 @@ Apple's frameworks are the initial providers. Application features must depend o
 ## 2. Current Project State
 
 - `WalkieTalkie` now has a landscape-only, two-panel conversation UI with fixed roles: the orange bottom panel is always the speech source and owns the microphone, while the blue top panel is always the translation target. The blue target panel occupies 5/8 of the available height; both panels have installed-language selectors.
-- The orange source prompt is dynamically translated from English into the selected source language when that offline Translation model is installed, with an English fallback when it is unavailable.
+- A compact swap control is anchored to the boundary between panels. Swapping exchanges the selected languages while preserving the fixed panel roles, so the next capture uses the new orange language for Speech-to-Text and the new orange-to-blue pair for Translation.
+- The source and target placeholder prompts are dynamically translated from English into their selected panel languages when those offline Translation models are installed, with English fallbacks when unavailable.
 - Deployment target is iOS 26.5; the local toolchain is Xcode 26.6 with an iOS 26.5 simulator runtime.
 - The app targets iPhone and iPad.
 - The project now compiles in Swift 6 mode and includes a microphone privacy usage description.

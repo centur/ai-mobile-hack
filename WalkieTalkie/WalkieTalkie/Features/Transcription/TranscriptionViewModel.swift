@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class TranscriptionViewModel {
     private static let sourcePrompt = "Tap a microphone and start speaking."
+    private static let targetPrompt = "Translation will appear here."
     private static let english = Language(identifier: "en")
 
     nonisolated enum Side: Equatable, Sendable {
@@ -28,7 +29,7 @@ final class TranscriptionViewModel {
     private(set) var installedLanguages: [Language] = []
     private(set) var isLoadingLanguages = false
     private(set) var sourceLanguageText = sourcePrompt
-    private(set) var targetLanguageText = "Translation will appear here."
+    private(set) var targetLanguageText = targetPrompt
     private(set) var modelStatusText = "Loading installed languages…"
 
     var topLanguage: Language?
@@ -63,7 +64,7 @@ final class TranscriptionViewModel {
             languages.first(where: { $0 != deviceLanguage })
         }
 
-        await updateSourcePrompt()
+        await updateInterfacePrompts()
         await refreshTranslationModelStatus()
     }
 
@@ -79,7 +80,7 @@ final class TranscriptionViewModel {
 
         resetConversationText()
         Task {
-            await updateSourcePrompt()
+            await updateInterfacePrompts()
             await refreshTranslationModelStatus()
         }
     }
@@ -89,7 +90,7 @@ final class TranscriptionViewModel {
         (topLanguage, bottomLanguage) = (bottomLanguage, topLanguage)
         resetConversationText()
         Task {
-            await updateSourcePrompt()
+            await updateInterfacePrompts()
             await refreshTranslationModelStatus()
         }
     }
@@ -177,7 +178,7 @@ final class TranscriptionViewModel {
                 let results = try await pipeline.start(source: source, target: target)
                 state = .listening
                 sourceLanguageText = "Listening in \(source.displayName())…"
-                targetLanguageText = "Translation will appear here."
+                targetLanguageText = Self.targetPrompt
 
                 for try await result in results {
                     try Task.checkCancellation()
@@ -236,7 +237,12 @@ final class TranscriptionViewModel {
 
     private func resetConversationText() {
         sourceLanguageText = Self.sourcePrompt
-        targetLanguageText = "Translation will appear here."
+        targetLanguageText = Self.targetPrompt
+    }
+
+    private func updateInterfacePrompts() async {
+        await updateSourcePrompt()
+        await updateTargetPrompt()
     }
 
     private func updateSourcePrompt() async {
@@ -262,6 +268,31 @@ final class TranscriptionViewModel {
 
         guard state == .idle, bottomLanguage == selectedLanguage else { return }
         sourceLanguageText = localizedPrompt ?? Self.sourcePrompt
+    }
+
+    private func updateTargetPrompt() async {
+        guard let selectedLanguage = topLanguage else {
+            targetLanguageText = Self.targetPrompt
+            return
+        }
+
+        let selectedCode = Locale(identifier: selectedLanguage.identifier).language.languageCode
+        let englishCode = Locale(identifier: Self.english.identifier).language.languageCode
+        guard selectedCode != englishCode else {
+            if state == .idle, topLanguage == selectedLanguage {
+                targetLanguageText = Self.targetPrompt
+            }
+            return
+        }
+
+        let localizedPrompt = try? await pipeline.translateText(
+            Self.targetPrompt,
+            from: Self.english,
+            to: selectedLanguage
+        )
+
+        guard state == .idle, topLanguage == selectedLanguage else { return }
+        targetLanguageText = localizedPrompt ?? Self.targetPrompt
     }
 
     private func preferredLanguage(in languages: [Language]) -> Language {

@@ -9,12 +9,12 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
-            GeometryReader { proxy in
-                let spacing: CGFloat = isCompactLandscape ? 8 : 12
-                let targetPanelHeight = proxy.size.height * 0.625
-                let sourcePanelHeight = proxy.size.height - targetPanelHeight - spacing
+        GeometryReader { proxy in
+            let spacing: CGFloat = isCompactLandscape ? 8 : 12
+            let targetPanelHeight = proxy.size.height * 0.625
+            let sourcePanelHeight = proxy.size.height - targetPanelHeight - spacing
 
+            ZStack(alignment: .topLeading) {
                 VStack(spacing: spacing) {
                     languagePanel(
                         side: .top,
@@ -32,26 +32,39 @@ struct ContentView: View {
                     )
                     .frame(height: max(0, sourcePanelHeight))
                 }
-            }
 
-            Button {
-                viewModel.swapLanguages()
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 52, height: 52)
-                    .background(.regularMaterial, in: Circle())
-                    .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
+                Button {
+                    viewModel.swapLanguages()
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(
+                            .system(
+                                size: isCompactLandscape ? 15 : 18,
+                                weight: .bold
+                            )
+                        )
+                        .foregroundStyle(.primary)
+                        .frame(
+                            width: isCompactLandscape ? 38 : 44,
+                            height: isCompactLandscape ? 38 : 44
+                        )
+                        .background(.regularMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.1), radius: 5, y: 2)
+                }
+                .buttonStyle(.plain)
+                .disabled(
+                    viewModel.state != .idle
+                        || viewModel.topLanguage == nil
+                        || viewModel.bottomLanguage == nil
+                )
+                .position(
+                    x: proxy.size.width / 2,
+                    y: targetPanelHeight + (spacing / 2)
+                )
+                .accessibilityLabel("Swap source and target languages")
+                .accessibilityHint("Updates speech recognition and translation languages")
+                .accessibilityIdentifier("swapLanguagesButton")
             }
-            .buttonStyle(.plain)
-            .disabled(
-                viewModel.state != .idle
-                    || viewModel.topLanguage == nil
-                    || viewModel.bottomLanguage == nil
-            )
-            .accessibilityLabel("Swap languages")
-            .accessibilityIdentifier("swapLanguagesButton")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottom) {
@@ -176,47 +189,42 @@ struct ContentView: View {
         return Button {
             viewModel.toggleCapture()
         } label: {
-            Image(systemName: active ? "stop.fill" : "mic.fill")
-                .symbolRenderingMode(.monochrome)
-                .font(
-                    .system(
-                        size: isCompactLandscape ? 19 : 25,
-                        weight: .bold
-                    )
-                )
-                .foregroundStyle(.white)
-                .frame(
-                    width: isCompactLandscape ? 44 : 60,
-                    height: isCompactLandscape ? 44 : 60
-                )
-                .background(tint, in: Circle())
-                .padding(isCompactLandscape ? 4 : 6)
-                .background(tint.opacity(active ? 0.22 : 0.12), in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(tint.opacity(0.28), lineWidth: 1)
-                }
-                .shadow(color: tint.opacity(0.2), radius: 3, y: 2)
+            microphoneIcon(tint: tint, active: active)
         }
         .buttonStyle(.plain)
         .disabled(!viewModel.isMicrophoneEnabled)
-        .opacity(viewModel.isMicrophoneEnabled ? 1 : 0.42)
         .accessibilityLabel(active ? "Stop listening" : "Speak source language")
         .accessibilityIdentifier("sourceLanguageMicrophoneButton")
     }
 
     private func targetOutputIndicator(tint: Color) -> some View {
-        Image(systemName: "text.bubble.fill")
-            .font(.system(size: isCompactLandscape ? 22 : 30, weight: .semibold))
-            .foregroundStyle(tint)
-            .frame(
-                width: isCompactLandscape ? 52 : 76,
-                height: isCompactLandscape ? 52 : 76
+        microphoneIcon(tint: tint, active: false)
+            .accessibilityLabel("Target language microphone indicator")
+            .accessibilityIdentifier("targetLanguageMicrophoneIndicator")
+    }
+
+    private func microphoneIcon(tint: Color, active: Bool) -> some View {
+        Image(systemName: active ? "stop.fill" : "mic.fill")
+            .symbolRenderingMode(.monochrome)
+            .font(
+                .system(
+                    size: isCompactLandscape ? 28 : 37,
+                    weight: .black
+                )
             )
-            .padding(isCompactLandscape ? 6 : 10)
-            .background(tint.opacity(0.1), in: Circle())
-            .accessibilityLabel("Translation output")
-            .accessibilityIdentifier("targetLanguageOutputIndicator")
+            .foregroundStyle(.white)
+            .frame(
+                width: isCompactLandscape ? 54 : 72,
+                height: isCompactLandscape ? 54 : 72
+            )
+            .background(tint, in: Circle())
+            .overlay {
+                Circle()
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            }
+            .padding(isCompactLandscape ? 8 : 11)
+            .background(tint.opacity(active ? 0.2 : 0.12), in: Circle())
+            .shadow(color: tint.opacity(0.16), radius: 3, y: 1)
     }
 
     private func listeningIndicator(active: Bool, tint: Color) -> some View {
