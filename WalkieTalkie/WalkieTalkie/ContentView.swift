@@ -71,16 +71,6 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .bottom) {
-            Text(viewModel.modelStatusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(.thinMaterial, in: Capsule())
-                .padding(.bottom, 8)
-        }
         .padding(isCompactLandscape ? 8 : 12)
         .background(Color(uiColor: .systemBackground))
         .task {
@@ -130,25 +120,21 @@ struct ContentView: View {
     @ViewBuilder
     private func languageText(role: TranscriptionViewModel.LanguageRole) -> some View {
         if role == .translatedTo {
-            AutoScrollingTranslationText(
+            AutoScrollingPanelText(
                 text: viewModel.text(for: role),
-                fontSize: isCompactLandscape ? 36 : 52
+                fontSize: isCompactLandscape ? 36 : 52,
+                weight: .black
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("translatedToLanguageTextLabel")
         } else {
-            Text(viewModel.text(for: role))
-                .font(
-                    .system(
-                        size: isCompactLandscape ? 24 : 34,
-                        weight: .regular,
-                        design: .rounded
-                    )
-                )
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .accessibilityIdentifier("spokenLanguageTextLabel")
+            AutoScrollingPanelText(
+                text: viewModel.text(for: role),
+                fontSize: isCompactLandscape ? 20 : 34,
+                weight: .regular
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("spokenLanguageTextLabel")
         }
     }
 
@@ -259,16 +245,28 @@ struct ContentView: View {
 
     private func languageMenuLabel(selection: Language?, tint: Color) -> some View {
         VStack(spacing: isCompactLandscape ? 2 : 5) {
-            Image(systemName: "globe")
-                .font(isCompactLandscape ? .body : .title2)
-            HStack(spacing: 5) {
-                Text(
-                    selection?.flagEmoji
-                        ?? (viewModel.isLoadingLanguages ? "…" : "🌐")
-                )
-                .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.caption.bold())
+            if let selection {
+                Text(selection.flagEmoji)
+                    .font(isCompactLandscape ? .title3 : .title)
+                    .accessibilityHidden(true)
+
+                HStack(spacing: 5) {
+                    Text(selection.twoLetterCode)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.bold())
+                }
+            } else {
+                Image(systemName: "globe")
+                    .font(isCompactLandscape ? .body : .title2)
+
+                HStack(spacing: 5) {
+                    if viewModel.isLoadingLanguages {
+                        Text("…")
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.caption.bold())
+                }
             }
         }
         .font(isCompactLandscape ? .subheadline.bold() : .headline)
@@ -352,15 +350,17 @@ struct ContentView: View {
     }
 }
 
-private struct AutoScrollingTranslationText: View {
-    private static let bottomAnchor = "translation-text-bottom"
+private struct AutoScrollingPanelText: View {
+    private static let bottomAnchor = "panel-text-bottom"
     private static let visibleLineCount: CGFloat = 4
 
     let text: String
     let fontSize: CGFloat
+    let weight: Font.Weight
 
     private var lineHeight: CGFloat {
-        let systemFont = UIFont.systemFont(ofSize: fontSize, weight: .black)
+        let uiWeight: UIFont.Weight = weight == .black ? .black : .regular
+        let systemFont = UIFont.systemFont(ofSize: fontSize, weight: uiWeight)
         let descriptor = systemFont.fontDescriptor.withDesign(.rounded)
             ?? systemFont.fontDescriptor
         return UIFont(descriptor: descriptor, size: fontSize).lineHeight
@@ -374,7 +374,7 @@ private struct AutoScrollingTranslationText: View {
                         .font(
                             .system(
                                 size: fontSize,
-                                weight: .black,
+                                weight: weight,
                                 design: .rounded
                             )
                         )

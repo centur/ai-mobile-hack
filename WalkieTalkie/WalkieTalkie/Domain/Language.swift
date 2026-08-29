@@ -41,4 +41,11 @@ nonisolated struct Language: Hashable, Identifiable, Sendable {
         }
         return String(String.UnicodeScalarView(regionalIndicators))
     }
+
+    /// Two-character language code used by the compact selector UI.
+    var twoLetterCode: String {
+        let code = Locale.Language(identifier: identifier).languageCode?.identifier
+            ?? identifier
+        return String(code.prefix(2)).uppercased()
+    }
 }

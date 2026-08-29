@@ -10,6 +10,8 @@ actor VoiceTranslationPipeline {
     private var latestTranscriptText = ""
     private var lastTranslatedText = ""
     private var accumulatedTranslatedText = ""
+    private var accumulatedSpokenText = ""
+    private var previousTranscriptText = ""
 
     init(
         speechConverter: SpeechToTextConverter,
@@ -103,6 +105,8 @@ actor VoiceTranslationPipeline {
         latestTranscriptText = ""
         lastTranslatedText = ""
         accumulatedTranslatedText = ""
+        accumulatedSpokenText = ""
+        previousTranscriptText = ""
         silenceTask?.cancel()
         silenceTask = nil
 
@@ -113,10 +117,11 @@ actor VoiceTranslationPipeline {
                     guard !original.isEmpty else { continue }
                     latestTranscriptText = original
                     silenceTask?.cancel()
+                    accumulateSpokenText(original)
 
                     continuation.yield(
                         VoiceTranslationResult(
-                            spokenLanguageText: original,
+                            spokenLanguageText: accumulatedSpokenText,
                             translatedToLanguageText: nil,
                             isFinal: segment.isFinal
                         )
@@ -241,10 +246,32 @@ actor VoiceTranslationPipeline {
             : "\(accumulatedTranslatedText)\n\(translated)"
         continuation.yield(
             VoiceTranslationResult(
-                spokenLanguageText: text,
+                spokenLanguageText: accumulatedSpokenText,
                 translatedToLanguageText: accumulatedTranslatedText,
                 isFinal: true
             )
         )
+    }
+
+    private func accumulateSpokenText(_ text: String) {
+        guard !previousTranscriptText.isEmpty else {
+            accumulatedSpokenText = text
+            previousTranscriptText = text
+            return
+        }
+
+        if text == previousTranscriptText {
+            return
+        }
+
+        if text.hasPrefix(previousTranscriptText)
+            || previousTranscriptText.hasPrefix(text) {
+            accumulatedSpokenText.removeLast(previousTranscriptText.count)
+            accumulatedSpokenText.append(text)
+        } else {
+            accumulatedSpokenText.append("\n")
+            accumulatedSpokenText.append(text)
+        }
+        previousTranscriptText = text
     }
 }
