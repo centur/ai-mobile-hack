@@ -3,7 +3,8 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var viewModel = TranscriptionViewModel()
-    @State private var isDownloadModelsAlertPresented = false
+    @State private var isSpeechModelManagerPresented = false
+    @State private var isTranslatedToLanguageAlertPresented = false
 
     private var isCompactLandscape: Bool {
         verticalSizeClass == .compact
@@ -12,26 +13,26 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { proxy in
             let spacing: CGFloat = isCompactLandscape ? 8 : 12
-            let targetPanelHeight = proxy.size.height * 0.625
-            let sourcePanelHeight = proxy.size.height - targetPanelHeight - spacing
+            let translatedToPanelHeight = proxy.size.height * 0.625
+            let spokenPanelHeight = proxy.size.height - translatedToPanelHeight - spacing
 
             ZStack(alignment: .topLeading) {
                 VStack(spacing: spacing) {
                     languagePanel(
-                        side: .top,
-                        language: viewModel.topLanguage,
+                        role: .translatedTo,
+                        language: viewModel.translatedToLanguage,
                         tint: .blue,
                         background: Color.blue.opacity(0.09)
                     )
-                    .frame(height: targetPanelHeight)
+                    .frame(height: translatedToPanelHeight)
 
                     languagePanel(
-                        side: .bottom,
-                        language: viewModel.bottomLanguage,
+                        role: .spoken,
+                        language: viewModel.spokenLanguage,
                         tint: .orange,
                         background: Color.orange.opacity(0.09)
                     )
-                    .frame(height: max(0, sourcePanelHeight))
+                    .frame(height: max(0, spokenPanelHeight))
                 }
 
                 Button {
@@ -55,14 +56,14 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .disabled(
                     viewModel.state != .idle
-                        || viewModel.topLanguage == nil
-                        || viewModel.bottomLanguage == nil
+                        || viewModel.translatedToLanguage == nil
+                        || viewModel.spokenLanguage == nil
                 )
                 .position(
                     x: proxy.size.width / 2,
-                    y: targetPanelHeight + (spacing / 2)
+                    y: translatedToPanelHeight + (spacing / 2)
                 )
-                .accessibilityLabel("Swap source and target languages")
+                .accessibilityLabel("Swap spoken and translated-to languages")
                 .accessibilityHint("Updates speech recognition and translation languages")
                 .accessibilityIdentifier("swapLanguagesButton")
             }
@@ -86,25 +87,29 @@ struct ContentView: View {
         .onDisappear {
             viewModel.cancelCapture()
         }
-        .alert("Downloading models is coming soon", isPresented: $isDownloadModelsAlertPresented) {
+        .sheet(isPresented: $isSpeechModelManagerPresented) {
+            SpeechModelManagerView(viewModel: viewModel)
+                .presentationDetents([.large])
+        }
+        .alert("Not implemented", isPresented: $isTranslatedToLanguageAlertPresented) {
             Button("OK", role: .cancel) {}
         }
     }
 
     private func languagePanel(
-        side: TranscriptionViewModel.Side,
+        role: TranscriptionViewModel.LanguageRole,
         language: Language?,
         tint: Color,
         background: Color
     ) -> some View {
         HStack(spacing: 28) {
-            Text(viewModel.text(for: side))
+            Text(viewModel.text(for: role))
                 .font(
                     .system(
-                        size: side == .top
+                        size: role == .translatedTo
                             ? (isCompactLandscape ? 36 : 52)
                             : (isCompactLandscape ? 24 : 34),
-                        weight: side == .top ? .black : .bold,
+                        weight: role == .translatedTo ? .black : .bold,
                         design: .rounded
                     )
                 )
@@ -112,12 +117,14 @@ struct ContentView: View {
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .accessibilityIdentifier(
-                    side == .top ? "targetLanguageTextLabel" : "sourceLanguageTextLabel"
+                    role == .translatedTo
+                        ? "translatedToLanguageTextLabel"
+                        : "spokenLanguageTextLabel"
                 )
 
             VStack(spacing: isCompactLandscape ? 5 : 14) {
-                languageMenu(side: side, selection: language, tint: tint)
-                microphoneButton(side: side, tint: tint)
+                languageMenu(role: role, selection: language, tint: tint)
+                microphoneButton(role: role, tint: tint)
             }
             .frame(width: isCompactLandscape ? 122 : 150)
         }
@@ -134,77 +141,100 @@ struct ContentView: View {
         )
     }
 
+    @ViewBuilder
     private func languageMenu(
-        side: TranscriptionViewModel.Side,
+        role: TranscriptionViewModel.LanguageRole,
         selection: Language?,
         tint: Color
     ) -> some View {
-        let languages = viewModel.languages(for: side)
+        if role == .translatedTo {
+            Button {
+                isTranslatedToLanguageAlertPresented = true
+            } label: {
+                languageMenuLabel(selection: selection, tint: tint)
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.state != .idle || viewModel.isLoadingLanguages)
+            .accessibilityLabel("Translated-to language selector")
+            .accessibilityIdentifier("translatedToLanguageSelector")
+        } else {
+            let languages = viewModel.languages(for: role)
 
-        return Menu {
-            if languages.isEmpty {
-                Text("No installed languages")
-            } else {
-                ForEach(languages) { language in
-                    Button {
-                        viewModel.select(language, for: side)
-                    } label: {
-                        if language == selection {
-                            Label(language.displayName(), systemImage: "checkmark")
-                        } else {
-                            Text(language.displayName())
+            Menu {
+                if languages.isEmpty {
+                    Text("No installed languages")
+                } else {
+                    ForEach(languages) { language in
+                        Button {
+                            viewModel.select(language, for: role)
+                        } label: {
+                            if language == selection {
+                                Label(language.displayName(), systemImage: "checkmark")
+                            } else {
+                                Text(language.displayName())
+                            }
                         }
                     }
                 }
-            }
 
-            Divider()
+                Divider()
 
-            Button {
-                isDownloadModelsAlertPresented = true
-            } label: {
-                Label("Download models for offline use", systemImage: "arrow.down.circle")
-            }
-        } label: {
-            VStack(spacing: isCompactLandscape ? 2 : 5) {
-                Image(systemName: "globe")
-                    .font(isCompactLandscape ? .body : .title2)
-                HStack(spacing: 5) {
-                    Text(
-                        selection?.displayName()
-                            ?? (viewModel.isLoadingLanguages ? "Loading…" : "Select")
-                    )
-                    .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.caption.bold())
+                Button {
+                    isSpeechModelManagerPresented = true
+                } label: {
+                    Label("Download models for offline use", systemImage: "arrow.down.circle")
                 }
+            } label: {
+                languageMenuLabel(selection: selection, tint: tint)
             }
-            .font(isCompactLandscape ? .subheadline.bold() : .headline)
-            .foregroundStyle(tint)
-            .frame(maxWidth: .infinity)
+            .disabled(viewModel.state != .idle || viewModel.isLoadingLanguages)
+            .accessibilityLabel("Select spoken language")
+            .accessibilityIdentifier("spokenLanguageSelector")
         }
-        .disabled(viewModel.state != .idle || viewModel.isLoadingLanguages)
-        .accessibilityLabel("Select \(side == .top ? "top" : "bottom") language")
-        .accessibilityIdentifier(side == .top ? "topLanguageSelector" : "bottomLanguageSelector")
+    }
+
+    private func languageMenuLabel(selection: Language?, tint: Color) -> some View {
+        VStack(spacing: isCompactLandscape ? 2 : 5) {
+            Image(systemName: "globe")
+                .font(isCompactLandscape ? .body : .title2)
+            HStack(spacing: 5) {
+                Text(
+                    selection?.displayName()
+                        ?? (viewModel.isLoadingLanguages ? "Loading…" : "Select")
+                )
+                .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption.bold())
+            }
+        }
+        .font(isCompactLandscape ? .subheadline.bold() : .headline)
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity)
     }
 
     private func microphoneButton(
-        side: TranscriptionViewModel.Side,
+        role: TranscriptionViewModel.LanguageRole,
         tint: Color
     ) -> some View {
-        let active = viewModel.isMicrophoneActive(for: side)
+        let active = viewModel.isMicrophoneActive(for: role)
 
         return Button {
-            viewModel.toggleCapture(for: side)
+            viewModel.toggleCapture(for: role)
         } label: {
             microphoneIcon(tint: tint, active: active)
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.isMicrophoneEnabled(for: side))
-        .accessibilityLabel(active ? "Stop listening" : "Speak \(side == .top ? "top" : "bottom") language")
+        .disabled(!viewModel.isMicrophoneEnabled(for: role))
+        .accessibilityLabel(
+            active
+                ? "Stop listening"
+                : "Speak \(role == .translatedTo ? "translated-to" : "spoken") language"
+        )
         .accessibilityHint(active ? "Tap to stop and translate" : "Tap to start recording")
         .accessibilityIdentifier(
-            side == .top ? "topLanguageMicrophoneButton" : "bottomLanguageMicrophoneButton"
+            role == .translatedTo
+                ? "translatedToLanguageMicrophoneButton"
+                : "spokenLanguageMicrophoneButton"
         )
     }
 
@@ -244,6 +274,117 @@ struct ContentView: View {
                     radius: active ? 9 + (12 * pulse) : 3,
                     y: active ? 0 : 1
                 )
+        }
+    }
+}
+
+private struct SpeechModelManagerView: View {
+    @Environment(\.dismiss) private var dismiss
+    let viewModel: TranscriptionViewModel
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isLoadingSpeechModels && viewModel.speechModels.isEmpty {
+                    ProgressView("Loading Speech-to-Text models…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.speechModels.isEmpty {
+                    ContentUnavailableView(
+                        "No Speech Models Available",
+                        systemImage: "waveform.slash",
+                        description: Text("On-device speech transcription is unavailable on this device.")
+                    )
+                } else {
+                    List {
+                        Section {
+                            ForEach(viewModel.speechModels) { model in
+                                speechModelRow(model)
+                            }
+                        } footer: {
+                            Text("Removing releases this app’s model reservation. iOS deletes shared model data later when it is no longer in use.")
+                        }
+                    }
+                    .refreshable {
+                        await viewModel.loadSpeechModels()
+                    }
+                }
+            }
+            .navigationTitle("Offline Speech Models")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .disabled(viewModel.speechModelOperationLanguage != nil)
+                }
+            }
+        }
+        .task {
+            await viewModel.loadSpeechModels()
+        }
+        .interactiveDismissDisabled(viewModel.speechModelOperationLanguage != nil)
+        .alert(
+            "Speech Models",
+            isPresented: Binding(
+                get: { viewModel.speechModelManagerMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        viewModel.clearSpeechModelManagerMessage()
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                viewModel.clearSpeechModelManagerMessage()
+            }
+        } message: {
+            Text(viewModel.speechModelManagerMessage ?? "")
+        }
+    }
+
+    private func speechModelRow(_ model: SpeechModelResource) -> some View {
+        HStack(spacing: 12) {
+            Text(model.status == .installed ? "🟢" : "🟡")
+                .accessibilityHidden(true)
+
+            Text(model.language.displayName())
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            action(for: model)
+                .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func action(for model: SpeechModelResource) -> some View {
+        if viewModel.speechModelOperationLanguage == model.language
+            || model.status == .downloading {
+            ProgressView()
+                .accessibilityLabel("Updating \(model.language.displayName())")
+        } else if model.status == .installed {
+            Button {
+                Task {
+                    await viewModel.removeSpeechModel(model.language)
+                }
+            } label: {
+                Text("⛔")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Delete \(model.language.displayName()) speech model")
+        } else {
+            Button {
+                Task {
+                    await viewModel.downloadSpeechModel(model.language)
+                }
+            } label: {
+                Text("⬇️")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Download \(model.language.displayName()) speech model")
         }
     }
 }

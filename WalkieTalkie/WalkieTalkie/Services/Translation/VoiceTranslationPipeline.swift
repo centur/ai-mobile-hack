@@ -34,6 +34,10 @@ actor VoiceTranslationPipeline {
         try await speechConverter.prepare(language: language)
     }
 
+    func removeSpeech(language: Language) async throws {
+        try await speechConverter.remove(language: language)
+    }
+
     func translationResourceStatus(
         from source: Language,
         to target: Language

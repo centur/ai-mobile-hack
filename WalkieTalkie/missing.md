@@ -6,7 +6,6 @@ This document records the gaps between the current implementation and the scope 
 
 - There is no participant-turn model or conversation timeline.
 - Translation model downloads cannot be initiated from the app.
-- Speech model preparation exists in the provider but is not connected to the UI.
 - Offline readiness has not been verified on a physical device in airplane mode.
 - There are no unit or UI test targets.
 
@@ -36,16 +35,14 @@ Missing:
 
 ## Phase 2 — Offline language resources
 
-Implemented: queries for Speech asset status and Translation pair availability.
+Implemented: queries for Speech asset status and Translation pair availability; a bottom-language Speech model-management sheet combining `SpeechTranscriber` with `DictationTranscriber` fallback coverage; Speech asset download/preparation; per-model operation state and errors; and app reservation release for installed Speech assets.
 
 Missing:
 
-- A Languages or resource-management screen.
-- Speech asset download/preparation initiated by the UI.
+- Top-language model selection and resource-management UI; its selector currently reports "Not implemented."
 - Translation model download using the Apple-controlled `translationTask`/`prepareTranslation()` lifecycle.
-- Replace the current "Downloading models is coming soon" placeholder alert with that download flow.
-- Download confirmation, progress, failure, retry, and storage-error states.
-- Speech asset reservation and release management within the installed-locale limit.
+- Translation download confirmation, progress, failure, retry, and storage-error states.
+- Speech download byte/progress reporting where Apple exposes it, plus explicit UI for the installed-locale limit.
 - A unified distinction between transcription-ready, translation-ready, and fully-offline-ready.
 - Handling for resource eviction after initial selection.
 - An offline-only preference for future provider selection.
@@ -119,7 +116,7 @@ The following planned extensions are not implemented:
 The core definition of done in `plan.md` remains unmet because:
 
 - Two participants cannot complete a manual walkie-talkie conversation without repeatedly swapping fixed source/target roles.
-- Installed, downloadable, and unsupported states are reported but are not actionable inside the app.
+- Translation model states are reported but are not yet actionable inside the app.
 - Airplane-mode physical-device testing has not passed.
 - Interruption and permission failures do not all provide complete recovery paths.
 - Feature state machines and provider contracts have no automated test coverage.

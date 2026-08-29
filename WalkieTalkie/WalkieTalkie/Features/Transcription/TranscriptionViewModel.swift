@@ -4,14 +4,13 @@ import Observation
 @MainActor
 @Observable
 final class TranscriptionViewModel {
-    private static let sourcePrompt = "Tap a microphone and start speaking."
-    private static let targetPrompt = "Translation will appear here."
+    private static let spokenPrompt = "Tap a microphone and start speaking."
+    private static let translatedToPrompt = "Translation will appear here."
     private static let english = Language(identifier: "en")
 
-    nonisolated enum Side: Equatable, Sendable {
-        case top
-        case bottom
-
+    nonisolated enum LanguageRole: Equatable, Sendable {
+        case translatedTo
+        case spoken
     }
 
     enum State: Equatable {
@@ -29,16 +28,20 @@ final class TranscriptionViewModel {
     private var hasLoadedLanguages = false
 
     private(set) var state: State = .idle
-    private(set) var installedSourceLanguages: [Language] = []
-    private(set) var installedTargetLanguages: [Language] = []
+    private(set) var installedSpokenLanguages: [Language] = []
+    private(set) var installedTranslatedToLanguages: [Language] = []
+    private(set) var speechModels: [SpeechModelResource] = []
     private(set) var isLoadingLanguages = false
-    private(set) var sourceLanguageText = sourcePrompt
-    private(set) var targetLanguageText = targetPrompt
+    private(set) var isLoadingSpeechModels = false
+    private(set) var speechModelOperationLanguage: Language?
+    private(set) var speechModelManagerMessage: String?
+    private(set) var spokenLanguageText = spokenPrompt
+    private(set) var translatedToLanguageText = translatedToPrompt
     private(set) var modelStatusText = "Loading installed languages…"
-    private(set) var activeMicrophoneSide: Side?
+    private(set) var activeMicrophoneRole: LanguageRole?
 
-    var topLanguage: Language?
-    var bottomLanguage: Language?
+    var translatedToLanguage: Language?
+    var spokenLanguage: Language?
 
     init(pipeline: VoiceTranslationPipeline = SpeechBackend.makeAppleOnDevice()) {
         self.pipeline = pipeline
@@ -51,7 +54,7 @@ final class TranscriptionViewModel {
         modelStatusText = "Checking installed Speech models…"
 
         let languages = await pipeline.installedSpeechLanguages()
-        installedSourceLanguages = languages
+        installedSpokenLanguages = languages
 
         guard !languages.isEmpty else {
             isLoadingLanguages = false
@@ -60,36 +63,87 @@ final class TranscriptionViewModel {
         }
 
         let deviceLanguage = preferredLanguage(in: languages)
-        bottomLanguage = deviceLanguage
+        spokenLanguage = deviceLanguage
 
-        await reloadInstalledTargets(for: deviceLanguage, preservingSelection: false)
+        await reloadInstalledTranslatedToLanguages(
+            for: deviceLanguage,
+            preservingSelection: false
+        )
         isLoadingLanguages = false
 
         await updateInterfacePrompts()
         await refreshTranslationModelStatus()
     }
 
-    func select(_ language: Language, for side: Side) {
+    func loadSpeechModels() async {
+        guard speechModelOperationLanguage == nil else { return }
+        isLoadingSpeechModels = true
+        speechModelManagerMessage = nil
+        await refreshSpeechModels()
+        isLoadingSpeechModels = false
+    }
+
+    func downloadSpeechModel(_ language: Language) async {
+        guard state == .idle, speechModelOperationLanguage == nil else { return }
+        speechModelOperationLanguage = language
+        updateSpeechModel(language, status: .downloading)
+
+        do {
+            try await pipeline.prepareSpeech(language: language)
+            await refreshSpeechModels()
+            await refreshInstalledLanguageSelections()
+        } catch {
+            speechModelManagerMessage = error.localizedDescription
+            await refreshSpeechModels()
+        }
+
+        speechModelOperationLanguage = nil
+    }
+
+    func removeSpeechModel(_ language: Language) async {
+        guard state == .idle, speechModelOperationLanguage == nil else { return }
+        speechModelOperationLanguage = language
+
+        do {
+            try await pipeline.removeSpeech(language: language)
+            speechModelManagerMessage = "\(language.displayName()) was released. iOS will remove the model when it is no longer used by the system or other apps."
+            await refreshSpeechModels()
+            await refreshInstalledLanguageSelections()
+        } catch {
+            speechModelManagerMessage = error.localizedDescription
+        }
+
+        speechModelOperationLanguage = nil
+    }
+
+    func clearSpeechModelManagerMessage() {
+        speechModelManagerMessage = nil
+    }
+
+    func select(_ language: Language, for role: LanguageRole) {
         guard state == .idle else { return }
 
-        switch side {
-        case .top:
-            topLanguage = language
+        switch role {
+        case .translatedTo:
+            translatedToLanguage = language
             resetConversationText()
             Task {
                 await updateInterfacePrompts()
                 await refreshTranslationModelStatus()
             }
-        case .bottom:
-            bottomLanguage = language
-            topLanguage = nil
-            installedTargetLanguages = []
+        case .spoken:
+            spokenLanguage = language
+            translatedToLanguage = nil
+            installedTranslatedToLanguages = []
             resetConversationText()
             languageSelectionTask?.cancel()
             languageSelectionTask = Task {
                 isLoadingLanguages = true
-                await reloadInstalledTargets(for: language, preservingSelection: false)
-                guard !Task.isCancelled, bottomLanguage == language else { return }
+                await reloadInstalledTranslatedToLanguages(
+                    for: language,
+                    preservingSelection: false
+                )
+                guard !Task.isCancelled, spokenLanguage == language else { return }
                 isLoadingLanguages = false
                 await updateInterfacePrompts()
                 await refreshTranslationModelStatus()
@@ -100,19 +154,26 @@ final class TranscriptionViewModel {
 
     func swapLanguages() {
         guard state == .idle else { return }
-        guard let topLanguage, let bottomLanguage else { return }
-        guard installedSourceLanguages.contains(topLanguage) else {
-            modelStatusText = "The \(topLanguage.displayName()) Speech model is not installed."
+        guard let translatedToLanguage, let spokenLanguage else { return }
+        guard installedSpokenLanguages.contains(translatedToLanguage) else {
+            modelStatusText = "The \(translatedToLanguage.displayName()) Speech model is not installed."
             return
         }
 
-        (self.topLanguage, self.bottomLanguage) = (bottomLanguage, topLanguage)
+        (self.translatedToLanguage, self.spokenLanguage) = (
+            spokenLanguage,
+            translatedToLanguage
+        )
         resetConversationText()
         languageSelectionTask?.cancel()
         languageSelectionTask = Task {
             isLoadingLanguages = true
-            await reloadInstalledTargets(for: topLanguage, preservingSelection: true)
-            guard !Task.isCancelled, self.bottomLanguage == topLanguage else { return }
+            await reloadInstalledTranslatedToLanguages(
+                for: translatedToLanguage,
+                preservingSelection: true
+            )
+            guard !Task.isCancelled,
+                  self.spokenLanguage == translatedToLanguage else { return }
             isLoadingLanguages = false
             await updateInterfacePrompts()
             await refreshTranslationModelStatus()
@@ -120,21 +181,21 @@ final class TranscriptionViewModel {
         }
     }
 
-    func toggleCapture(for side: Side) {
+    func toggleCapture(for role: LanguageRole) {
         switch state {
         case .idle:
-            startCapture(for: side)
+            startCapture(for: role)
         case .preparing:
-            if activeMicrophoneSide == side {
+            if activeMicrophoneRole == role {
                 cancelCapture()
             } else {
-                switchCapture(to: side, finalizingCurrentCapture: false)
+                switchCapture(to: role, finalizingCurrentCapture: false)
             }
         case .listening:
-            if activeMicrophoneSide == side {
+            if activeMicrophoneRole == role {
                 finishCapture()
             } else {
-                switchCapture(to: side, finalizingCurrentCapture: true)
+                switchCapture(to: role, finalizingCurrentCapture: true)
             }
         case .finishing:
             break
@@ -147,26 +208,26 @@ final class TranscriptionViewModel {
         captureID = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        activeMicrophoneSide = nil
+        activeMicrophoneRole = nil
         state = .idle
 
         Task { await pipeline.cancel() }
     }
 
-    func languages(for side: Side) -> [Language] {
-        side == .bottom ? installedSourceLanguages : installedTargetLanguages
+    func languages(for role: LanguageRole) -> [Language] {
+        role == .spoken ? installedSpokenLanguages : installedTranslatedToLanguages
     }
 
-    func text(for side: Side) -> String {
-        side == .top ? targetLanguageText : sourceLanguageText
+    func text(for role: LanguageRole) -> String {
+        role == .translatedTo ? translatedToLanguageText : spokenLanguageText
     }
 
-    func isMicrophoneActive(for side: Side) -> Bool {
-        activeMicrophoneSide == side && (state == .preparing || state == .listening)
+    func isMicrophoneActive(for role: LanguageRole) -> Bool {
+        activeMicrophoneRole == role && (state == .preparing || state == .listening)
     }
 
-    func isMicrophoneEnabled(for side: Side) -> Bool {
-        guard language(for: side) != nil, language(for: side.opposite) != nil else {
+    func isMicrophoneEnabled(for role: LanguageRole) -> Bool {
+        guard language(for: role) != nil, language(for: role.opposite) != nil else {
             return false
         }
         switch state {
@@ -177,21 +238,21 @@ final class TranscriptionViewModel {
         }
     }
 
-    private func startCapture(for side: Side) {
-        guard let source = language(for: side),
-              let target = language(for: side.opposite) else {
+    private func startCapture(for role: LanguageRole) {
+        guard let source = language(for: role),
+              let target = language(for: role.opposite) else {
             modelStatusText = "Select two installed languages first."
             return
         }
         guard source != target else {
-            modelStatusText = "Source and target languages must be different."
+            modelStatusText = "Spoken and translated-to languages must be different."
             return
         }
 
         state = .preparing
-        activeMicrophoneSide = side
-        setText("Preparing \(source.displayName()) speech recognition…", for: side)
-        setText("Checking \(target.displayName()) translation model…", for: side.opposite)
+        activeMicrophoneRole = role
+        setText("Preparing \(source.displayName()) speech recognition…", for: role)
+        setText("Checking \(target.displayName()) translation model…", for: role.opposite)
         let captureID = UUID()
         self.captureID = captureID
 
@@ -224,35 +285,35 @@ final class TranscriptionViewModel {
                 let results = try await pipeline.start(source: source, target: target)
                 guard self.captureID == captureID else { return }
                 state = .listening
-                setText("Listening in \(source.displayName())…", for: side)
-                setText(Self.targetPrompt, for: side.opposite)
+                setText("Listening in \(source.displayName())…", for: role)
+                setText(Self.translatedToPrompt, for: role.opposite)
 
                 for try await result in results {
                     try Task.checkCancellation()
                     guard self.captureID == captureID else { return }
-                    setText(result.sourceLanguageText, for: side)
+                    setText(result.sourceLanguageText, for: role)
                     if let translation = result.targetLanguageText {
-                        setText(translation, for: side.opposite)
+                        setText(translation, for: role.opposite)
                     }
                 }
 
                 guard self.captureID == captureID else { return }
                 state = .idle
-                activeMicrophoneSide = nil
+                activeMicrophoneRole = nil
                 self.captureID = nil
                 transcriptionTask = nil
             } catch is CancellationError {
                 guard self.captureID == captureID else { return }
                 state = .idle
-                activeMicrophoneSide = nil
+                activeMicrophoneRole = nil
                 self.captureID = nil
                 transcriptionTask = nil
             } catch {
                 guard self.captureID == captureID else { return }
-                setText(error.localizedDescription, for: side.opposite)
+                setText(error.localizedDescription, for: role.opposite)
                 modelStatusText = error.localizedDescription
                 state = .idle
-                activeMicrophoneSide = nil
+                activeMicrophoneRole = nil
                 self.captureID = nil
                 transcriptionTask = nil
                 await pipeline.cancel()
@@ -262,16 +323,16 @@ final class TranscriptionViewModel {
 
     private func finishCapture() {
         state = .finishing
-        activeMicrophoneSide = nil
+        activeMicrophoneRole = nil
         Task { await pipeline.finish() }
     }
 
     private func switchCapture(
-        to side: Side,
+        to role: LanguageRole,
         finalizingCurrentCapture: Bool
     ) {
         let previousTask = transcriptionTask
-        activeMicrophoneSide = nil
+        activeMicrophoneRole = nil
         state = .finishing
 
         captureTransitionTask?.cancel()
@@ -289,133 +350,194 @@ final class TranscriptionViewModel {
 
             state = .idle
             captureTransitionTask = nil
-            startCapture(for: side)
+            startCapture(for: role)
         }
     }
 
     private func refreshTranslationModelStatus() async {
-        guard let topLanguage, let bottomLanguage else {
-            modelStatusText = installedSourceLanguages.isEmpty
+        guard let translatedToLanguage, let spokenLanguage else {
+            modelStatusText = installedSpokenLanguages.isEmpty
                 ? "Install a Speech language in Settings."
                 : "Select an installed offline language pair."
             return
         }
-        guard topLanguage != bottomLanguage else {
-            modelStatusText = "Source and target languages must be different."
+        guard translatedToLanguage != spokenLanguage else {
+            modelStatusText = "Spoken and translated-to languages must be different."
             return
         }
 
-        let bottomToTop = await pipeline.translationResourceStatus(
-            from: bottomLanguage,
-            to: topLanguage
+        let spokenToTranslated = await pipeline.translationResourceStatus(
+            from: spokenLanguage,
+            to: translatedToLanguage
         )
 
-        switch bottomToTop {
+        switch spokenToTranslated {
         case .installed:
-            modelStatusText = "\(bottomLanguage.displayName()) → \(topLanguage.displayName()) is ready offline."
+            modelStatusText = "\(spokenLanguage.displayName()) → \(translatedToLanguage.displayName()) is ready offline."
         case .downloadable:
-            modelStatusText = "The source-to-target translation model is not downloaded."
+            modelStatusText = "The spoken-to-translated translation model is not downloaded."
         case .unsupported:
-            modelStatusText = "The selected source-to-target translation is unsupported."
+            modelStatusText = "The selected spoken-to-translated translation is unsupported."
         }
+    }
+
+    private func refreshSpeechModels() async {
+        let supported = await pipeline.supportedSpeechLanguages()
+        let installed = Set(await pipeline.installedSpeechLanguages())
+        var resources: [SpeechModelResource] = []
+        resources.reserveCapacity(supported.count)
+
+        for language in supported {
+            guard !Task.isCancelled else { return }
+            let status: SpeechResourceStatus
+            if installed.contains(language) {
+                status = .installed
+            } else {
+                status = await pipeline.speechResourceStatus(for: language)
+            }
+            guard status != .unsupported else { continue }
+            resources.append(SpeechModelResource(language: language, status: status))
+        }
+
+        speechModels = resources
+    }
+
+    private func updateSpeechModel(_ language: Language, status: SpeechResourceStatus) {
+        guard let index = speechModels.firstIndex(where: { $0.language == language }) else {
+            return
+        }
+        speechModels[index].status = status
+    }
+
+    private func refreshInstalledLanguageSelections() async {
+        let installed = await pipeline.installedSpeechLanguages()
+        installedSpokenLanguages = installed
+
+        guard !installed.isEmpty else {
+            spokenLanguage = nil
+            translatedToLanguage = nil
+            installedTranslatedToLanguages = []
+            modelStatusText = "No on-device Speech models are installed."
+            resetConversationText()
+            return
+        }
+
+        if let spokenLanguage, installed.contains(spokenLanguage) {
+            // Keep the current spoken-language selection.
+        } else {
+            spokenLanguage = preferredLanguage(in: installed)
+        }
+
+        guard let spokenLanguage else { return }
+        await reloadInstalledTranslatedToLanguages(
+            for: spokenLanguage,
+            preservingSelection: true
+        )
+        await updateInterfacePrompts()
+        await refreshTranslationModelStatus()
     }
 
     private func resetConversationText() {
-        sourceLanguageText = Self.sourcePrompt
-        targetLanguageText = Self.targetPrompt
+        spokenLanguageText = Self.spokenPrompt
+        translatedToLanguageText = Self.translatedToPrompt
     }
 
-    private func language(for side: Side) -> Language? {
-        side == .top ? topLanguage : bottomLanguage
+    private func language(for role: LanguageRole) -> Language? {
+        role == .translatedTo ? translatedToLanguage : spokenLanguage
     }
 
-    private func setText(_ text: String, for side: Side) {
-        if side == .top {
-            targetLanguageText = text
+    private func setText(_ text: String, for role: LanguageRole) {
+        if role == .translatedTo {
+            translatedToLanguageText = text
         } else {
-            sourceLanguageText = text
+            spokenLanguageText = text
         }
     }
 
-    private func reloadInstalledTargets(
-        for source: Language,
+    private func reloadInstalledTranslatedToLanguages(
+        for spoken: Language,
         preservingSelection: Bool
     ) async {
-        let forwardTargets = await pipeline.installedTranslationTargets(from: source)
-        var targets: [Language] = []
-        for target in forwardTargets where installedSourceLanguages.contains(target) {
+        let forwardTargets = await pipeline.installedTranslationTargets(from: spoken)
+        var translatedToLanguages: [Language] = []
+        for translatedTo in forwardTargets where installedSpokenLanguages.contains(translatedTo) {
             guard !Task.isCancelled else { return }
-            if await pipeline.translationResourceStatus(from: target, to: source) == .installed {
-                targets.append(target)
+            if await pipeline.translationResourceStatus(
+                from: translatedTo,
+                to: spoken
+            ) == .installed {
+                translatedToLanguages.append(translatedTo)
             }
         }
-        guard !Task.isCancelled, bottomLanguage == source else { return }
+        guard !Task.isCancelled, spokenLanguage == spoken else { return }
 
-        installedTargetLanguages = targets
-        if preservingSelection, let topLanguage, targets.contains(topLanguage) {
+        installedTranslatedToLanguages = translatedToLanguages
+        if preservingSelection,
+           let translatedToLanguage,
+           translatedToLanguages.contains(translatedToLanguage) {
             return
         }
 
-        let indonesian = language(matching: "id", in: targets)
-        topLanguage = indonesian ?? targets.first
-        if targets.isEmpty {
-            modelStatusText = "No offline Translation models are installed for \(source.displayName())."
+        let indonesian = language(matching: "id", in: translatedToLanguages)
+        translatedToLanguage = indonesian ?? translatedToLanguages.first
+        if translatedToLanguages.isEmpty {
+            modelStatusText = "No offline Translation models are installed for \(spoken.displayName())."
         }
     }
 
     private func updateInterfacePrompts() async {
-        await updateSourcePrompt()
-        await updateTargetPrompt()
+        await updateSpokenPrompt()
+        await updateTranslatedToPrompt()
     }
 
-    private func updateSourcePrompt() async {
-        guard let selectedLanguage = bottomLanguage else {
-            sourceLanguageText = Self.sourcePrompt
+    private func updateSpokenPrompt() async {
+        guard let selectedLanguage = spokenLanguage else {
+            spokenLanguageText = Self.spokenPrompt
             return
         }
 
         let selectedCode = Locale(identifier: selectedLanguage.identifier).language.languageCode
         let englishCode = Locale(identifier: Self.english.identifier).language.languageCode
         guard selectedCode != englishCode else {
-            if state == .idle, bottomLanguage == selectedLanguage {
-                sourceLanguageText = Self.sourcePrompt
+            if state == .idle, spokenLanguage == selectedLanguage {
+                spokenLanguageText = Self.spokenPrompt
             }
             return
         }
 
         let localizedPrompt = try? await pipeline.translateText(
-            Self.sourcePrompt,
+            Self.spokenPrompt,
             from: Self.english,
             to: selectedLanguage
         )
 
-        guard state == .idle, bottomLanguage == selectedLanguage else { return }
-        sourceLanguageText = localizedPrompt ?? Self.sourcePrompt
+        guard state == .idle, spokenLanguage == selectedLanguage else { return }
+        spokenLanguageText = localizedPrompt ?? Self.spokenPrompt
     }
 
-    private func updateTargetPrompt() async {
-        guard let selectedLanguage = topLanguage else {
-            targetLanguageText = Self.targetPrompt
+    private func updateTranslatedToPrompt() async {
+        guard let selectedLanguage = translatedToLanguage else {
+            translatedToLanguageText = Self.translatedToPrompt
             return
         }
 
         let selectedCode = Locale(identifier: selectedLanguage.identifier).language.languageCode
         let englishCode = Locale(identifier: Self.english.identifier).language.languageCode
         guard selectedCode != englishCode else {
-            if state == .idle, topLanguage == selectedLanguage {
-                targetLanguageText = Self.targetPrompt
+            if state == .idle, translatedToLanguage == selectedLanguage {
+                translatedToLanguageText = Self.translatedToPrompt
             }
             return
         }
 
         let localizedPrompt = try? await pipeline.translateText(
-            Self.targetPrompt,
+            Self.translatedToPrompt,
             from: Self.english,
             to: selectedLanguage
         )
 
-        guard state == .idle, topLanguage == selectedLanguage else { return }
-        targetLanguageText = localizedPrompt ?? Self.targetPrompt
+        guard state == .idle, translatedToLanguage == selectedLanguage else { return }
+        translatedToLanguageText = localizedPrompt ?? Self.translatedToPrompt
     }
 
     private func preferredLanguage(in languages: [Language]) -> Language {
@@ -441,8 +563,8 @@ final class TranscriptionViewModel {
     }
 }
 
-private extension TranscriptionViewModel.Side {
+private extension TranscriptionViewModel.LanguageRole {
     var opposite: Self {
-        self == .top ? .bottom : .top
+        self == .translatedTo ? .spoken : .translatedTo
     }
 }

@@ -29,6 +29,10 @@ actor SpeechToTextConverter {
         try await transcriber.prepare(language: language)
     }
 
+    func remove(language: Language) async throws {
+        try await transcriber.remove(language: language)
+    }
+
     func start(language: Language) async throws -> AsyncThrowingStream<TranscriptSegment, Error> {
         guard !isRunning else {
             throw SpeechBackendError.captureAlreadyRunning
