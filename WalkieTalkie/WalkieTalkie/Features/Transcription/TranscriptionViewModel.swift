@@ -7,6 +7,7 @@ final class TranscriptionViewModel {
     private static let spokenPrompt = "Tap a microphone and start speaking."
     private static let translatedToPrompt = "Translation will appear here."
     private static let english = Language(identifier: "en")
+    private static let silenceDurationKey = "translationSilenceDurationSeconds"
 
     nonisolated enum LanguageRole: Equatable, Sendable {
         case translatedTo
@@ -43,12 +44,18 @@ final class TranscriptionViewModel {
     private(set) var translatedToLanguageText = translatedToPrompt
     private(set) var modelStatusText = "Loading installed languages…"
     private(set) var activeMicrophoneRole: LanguageRole?
+    private(set) var silenceDurationSeconds = 1.0
 
     var translatedToLanguage: Language?
     var spokenLanguage: Language?
 
     init(pipeline: VoiceTranslationPipeline = SpeechBackend.makeAppleOnDevice()) {
         self.pipeline = pipeline
+        if let savedDuration = UserDefaults.standard.object(
+            forKey: Self.silenceDurationKey
+        ) as? Double {
+            silenceDurationSeconds = min(max(savedDuration, 0.5), 5.0)
+        }
     }
 
     func loadInstalledLanguages() async {
@@ -167,6 +174,15 @@ final class TranscriptionViewModel {
 
     func clearTranslationModelManagerMessage() {
         translationModelManagerMessage = nil
+    }
+
+    func setSilenceDuration(seconds: Double) {
+        guard state == .idle else { return }
+        silenceDurationSeconds = min(max(seconds, 0.5), 5.0)
+        UserDefaults.standard.set(
+            silenceDurationSeconds,
+            forKey: Self.silenceDurationKey
+        )
     }
 
     func select(_ language: Language, for role: LanguageRole) {
@@ -325,7 +341,8 @@ final class TranscriptionViewModel {
                 try Task.checkCancellation()
                 let results = try await pipeline.start(
                     spokenLanguage: captureSpokenLanguage,
-                    translatedToLanguage: translationLanguage
+                    translatedToLanguage: translationLanguage,
+                    silenceDuration: .milliseconds(Int(silenceDurationSeconds * 1_000))
                 )
                 guard self.captureID == captureID else { return }
                 state = .listening

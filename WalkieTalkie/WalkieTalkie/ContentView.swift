@@ -213,6 +213,30 @@ struct ContentView: View {
                 } label: {
                     Label("Download models for offline use", systemImage: "arrow.down.circle")
                 }
+
+                Divider()
+
+                Menu {
+                    ForEach([0.5, 1.0, 1.5, 2.0, 3.0, 5.0], id: \.self) { seconds in
+                        Button {
+                            viewModel.setSilenceDuration(seconds: seconds)
+                        } label: {
+                            let duration = seconds.formatted(
+                                .number.precision(.fractionLength(1))
+                            )
+                            if seconds == viewModel.silenceDurationSeconds {
+                                Label("\(duration) seconds", systemImage: "checkmark")
+                            } else {
+                                Text("\(duration) seconds")
+                            }
+                        }
+                    }
+                } label: {
+                    let duration = viewModel.silenceDurationSeconds.formatted(
+                        .number.precision(.fractionLength(1))
+                    )
+                    Label("Translate after \(duration)s silence", systemImage: "timer")
+                }
             } label: {
                 languageMenuLabel(selection: selection, tint: tint)
             }

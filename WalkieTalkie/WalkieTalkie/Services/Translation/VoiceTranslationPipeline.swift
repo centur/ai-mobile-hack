@@ -6,6 +6,9 @@ actor VoiceTranslationPipeline {
     private let translator: any TextTranslating
     private let modelInventory: any TranslationModelInventorying
     private var relayTask: Task<Void, Never>?
+    private var silenceTask: Task<Void, Never>?
+    private var latestTranscriptText = ""
+    private var lastTranslatedText = ""
 
     init(
         speechConverter: SpeechToTextConverter,
@@ -89,46 +92,62 @@ actor VoiceTranslationPipeline {
 
     func start(
         spokenLanguage: Language,
-        translatedToLanguage: Language?
+        translatedToLanguage: Language?,
+        silenceDuration: Duration
     ) async throws -> AsyncThrowingStream<VoiceTranslationResult, Error> {
         let transcriptResults = try await speechConverter.start(language: spokenLanguage)
         let (results, continuation) = AsyncThrowingStream<VoiceTranslationResult, Error>.makeStream(
             bufferingPolicy: .bufferingNewest(50)
         )
+        latestTranscriptText = ""
+        lastTranslatedText = ""
+        silenceTask?.cancel()
+        silenceTask = nil
 
         relayTask = Task {
             do {
                 for try await segment in transcriptResults {
                     let original = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !original.isEmpty else { continue }
+                    latestTranscriptText = original
+                    silenceTask?.cancel()
 
-                    if segment.isFinal, let translatedToLanguage {
-                        let translated = try? await translator.translate(
+                    continuation.yield(
+                        VoiceTranslationResult(
+                            spokenLanguageText: original,
+                            translatedToLanguageText: nil,
+                            isFinal: segment.isFinal
+                        )
+                    )
+
+                    guard let translatedToLanguage else { continue }
+                    if segment.isFinal {
+                        await translateLatestTranscript(
                             original,
                             from: spokenLanguage,
-                            to: translatedToLanguage
-                        )
-                        continuation.yield(
-                            VoiceTranslationResult(
-                                spokenLanguageText: original,
-                                translatedToLanguageText: translated,
-                                isFinal: true
-                            )
+                            to: translatedToLanguage,
+                            continuation: continuation
                         )
                     } else {
-                        continuation.yield(
-                            VoiceTranslationResult(
-                                spokenLanguageText: original,
-                                translatedToLanguageText: nil,
-                                isFinal: segment.isFinal
-                            )
+                        scheduleTranslationAfterSilence(
+                            original,
+                            from: spokenLanguage,
+                            to: translatedToLanguage,
+                            silenceDuration: silenceDuration,
+                            continuation: continuation
                         )
                     }
                 }
+                silenceTask?.cancel()
+                silenceTask = nil
                 continuation.finish()
             } catch is CancellationError {
+                silenceTask?.cancel()
+                silenceTask = nil
                 continuation.finish()
             } catch {
+                silenceTask?.cancel()
+                silenceTask = nil
                 continuation.finish(throwing: error)
             }
             relayDidEnd()
@@ -142,10 +161,14 @@ actor VoiceTranslationPipeline {
     }
 
     func finish() async {
+        silenceTask?.cancel()
+        silenceTask = nil
         await speechConverter.finish()
     }
 
     func cancel() async {
+        silenceTask?.cancel()
+        silenceTask = nil
         relayTask?.cancel()
         relayTask = nil
         await speechConverter.cancel()
@@ -154,5 +177,57 @@ actor VoiceTranslationPipeline {
 
     private func relayDidEnd() {
         relayTask = nil
+    }
+
+    private func scheduleTranslationAfterSilence(
+        _ text: String,
+        from spokenLanguage: Language,
+        to translatedToLanguage: Language,
+        silenceDuration: Duration,
+        continuation: AsyncThrowingStream<VoiceTranslationResult, Error>.Continuation
+    ) {
+        silenceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: silenceDuration)
+                guard !Task.isCancelled else { return }
+                await self?.translateLatestTranscript(
+                    text,
+                    from: spokenLanguage,
+                    to: translatedToLanguage,
+                    continuation: continuation
+                )
+            } catch is CancellationError {
+                // A newer speech result restarted the silence interval.
+            } catch {
+                // Sleeping has no other expected failure mode.
+            }
+        }
+    }
+
+    private func translateLatestTranscript(
+        _ text: String,
+        from spokenLanguage: Language,
+        to translatedToLanguage: Language,
+        continuation: AsyncThrowingStream<VoiceTranslationResult, Error>.Continuation
+    ) async {
+        guard latestTranscriptText == text, lastTranslatedText != text else { return }
+        let translated = try? await translator.translate(
+            text,
+            from: spokenLanguage,
+            to: translatedToLanguage
+        )
+        guard !Task.isCancelled,
+              latestTranscriptText == text,
+              lastTranslatedText != text,
+              let translated else { return }
+
+        lastTranslatedText = text
+        continuation.yield(
+            VoiceTranslationResult(
+                spokenLanguageText: text,
+                translatedToLanguageText: translated,
+                isFinal: true
+            )
+        )
     }
 }
