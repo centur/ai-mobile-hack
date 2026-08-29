@@ -8,14 +8,44 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var viewModel = TranscriptionViewModel()
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        VStack(spacing: 48) {
+            Text(viewModel.transcript)
+                .font(.title2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: 120)
+                .accessibilityIdentifier("transcriptLabel")
+
+            Button {
+                viewModel.toggleCapture()
+            } label: {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 88, height: 88)
+                    .background(
+                        viewModel.isListening ? Color.red : Color.accentColor,
+                        in: Circle()
+                    )
+                    .shadow(
+                        color: (viewModel.isListening ? Color.red : Color.accentColor)
+                            .opacity(0.3),
+                        radius: 12,
+                        y: 6
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.state == .finishing)
+            .accessibilityLabel(viewModel.isListening ? "Stop listening" : "Start listening")
+            .accessibilityIdentifier("microphoneButton")
         }
-        .padding()
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onDisappear {
+            viewModel.cancelCapture()
+        }
     }
 }
 

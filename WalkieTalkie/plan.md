@@ -18,12 +18,13 @@ Apple's frameworks are the initial providers. Application features must depend o
 
 ## 2. Current Project State
 
-- `WalkieTalkie` still has the generated placeholder UI; no product UI has been selected or implemented yet.
+- `WalkieTalkie` now has the selected minimal transcription UI: one microphone button and one transcript label.
 - Deployment target is iOS 26.5; the local toolchain is Xcode 26.6 with an iOS 26.5 simulator runtime.
 - The app targets iPhone and iPad.
 - The project now compiles in Swift 6 mode and includes a microphone privacy usage description.
 - The first speech backend slice is implemented: provider-neutral audio/transcript contracts, Apple microphone capture, on-device `SpeechAnalyzer`/`SpeechTranscriber`, Speech asset status/download preparation, format conversion, finalization, and cancellation.
-- Physical-device speech verification, interruption/route handling, UI, test targets, translation, synthesis, and persistence remain pending.
+- The UI prepares the preferred supported language, starts/stops capture, renders partial/final transcript results, reports setup/errors in the same label, and cancels capture when dismissed.
+- Physical-device speech verification, interruption/route handling, test targets, translation, synthesis, and persistence remain pending.
 
 ## 3. Product Scope
 
