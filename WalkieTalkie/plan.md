@@ -22,6 +22,8 @@ Apple's frameworks are the initial providers. Application features must depend o
 - A compact swap control is anchored to the boundary between panels. Swapping exchanges the selected languages while preserving the fixed panel roles, so the next capture uses the new orange language for Speech-to-Text and the new orange-to-blue pair for Translation.
 - The orange microphone uses hold-to-talk interaction: touch-down begins capture and release finalizes it. A seven-mark processing indicator matching the UI reference is visible only while the microphone is held; inactive indicators are fully hidden.
 - The source and target placeholder prompts are dynamically translated from English into their selected panel languages when those offline Translation models are installed, with English fallbacks when unavailable.
+- The application bundle now uses the full-bleed navy `WT` waveform artwork as its universal iPhone/iPad app icon.
+- Landscape preference now uses an iOS 26 scene-based `UIHostingController` orientation lock. The deprecated `UIRequiresFullScreen` bundle key has been removed, and the adaptive UI remains compatible with iPad window resizing when the system cannot honor the lock.
 - Deployment target is iOS 26.5; the local toolchain is Xcode 26.6 with an iOS 26.5 simulator runtime.
 - The app targets iPhone and iPad.
 - The project now compiles in Swift 6 mode and includes a microphone privacy usage description.
