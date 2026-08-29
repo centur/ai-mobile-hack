@@ -23,60 +23,32 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     }
 
     func installedLanguages() async -> [Language] {
-        let dictationInstalled = await DictationTranscriber.installedLocales
-        guard SpeechTranscriber.isAvailable else {
-            return Self.sortedUnique(dictationInstalled.compactMap(Self.baseLanguage))
+        var installed = await DictationTranscriber.installedLocales.compactMap(Self.baseLanguage)
+        if SpeechTranscriber.isAvailable {
+            installed.append(
+                contentsOf: await SpeechTranscriber.installedLocales.compactMap(Self.baseLanguage)
+            )
         }
-
-        let speechSupported = Set(
-            await SpeechTranscriber.supportedLocales.compactMap(Self.baseLanguage)
-        )
-        var installed = await SpeechTranscriber.installedLocales.compactMap(Self.baseLanguage)
-        installed.append(
-            contentsOf: dictationInstalled.compactMap(Self.baseLanguage).filter {
-                !speechSupported.contains($0)
-            }
-        )
         return Self.sortedUnique(installed)
     }
 
     func resourceStatus(for language: Language) async -> SpeechResourceStatus {
-        guard let backend = await backend(for: language) else { return .unsupported }
+        let candidates = await backends(for: language)
+        guard !candidates.isEmpty else { return .unsupported }
 
-        switch backend {
-        case .speech(let locale):
-            for installedLocale in await SpeechTranscriber.installedLocales
-            where Self.matches(installedLocale, language: language) {
-                let module = SpeechTranscriber(
-                    locale: installedLocale,
-                    preset: .progressiveTranscription
-                )
-                if await AssetInventory.status(forModules: [module]) == .installed {
-                    return .installed
-                }
-            }
-            return await Self.resourceStatus(
-                for: SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
-            )
-        case .dictation(let locale):
-            for installedLocale in await DictationTranscriber.installedLocales
-            where Self.matches(installedLocale, language: language) {
-                let module = DictationTranscriber(
-                    locale: installedLocale,
-                    preset: .progressiveLongDictation
-                )
-                if await AssetInventory.status(forModules: [module]) == .installed {
-                    return .installed
-                }
-            }
-            return await Self.resourceStatus(
-                for: DictationTranscriber(locale: locale, preset: .progressiveLongDictation)
-            )
+        var statuses: [SpeechResourceStatus] = []
+        for candidate in candidates {
+            statuses.append(await status(for: candidate, language: language))
         }
+
+        if statuses.contains(.installed) { return .installed }
+        if statuses.contains(.downloading) { return .downloading }
+        if statuses.contains(.downloadable) { return .downloadable }
+        return .unsupported
     }
 
     func prepare(language: Language) async throws {
-        guard let backend = await backend(for: language) else {
+        guard let backend = await preferredBackend(for: language) else {
             throw SpeechBackendError.unsupportedLanguage(language.identifier)
         }
 
@@ -122,7 +94,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     ) async throws -> AsyncThrowingStream<TranscriptSegment, Error> {
         await cancel()
 
-        guard let backend = await backend(for: language) else {
+        guard let backend = await preferredBackend(for: language) else {
             throw SpeechBackendError.unsupportedLanguage(language.identifier)
         }
 
@@ -260,18 +232,80 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         analyzer = nil
     }
 
-    private func backend(for language: Language) async -> Backend? {
+    private func backends(for language: Language) async -> [Backend] {
         let locale = Locale(identifier: language.identifier)
+        var candidates: [Backend] = []
         if SpeechTranscriber.isAvailable,
            let speechLocale = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
-            return .speech(speechLocale)
+            candidates.append(.speech(speechLocale))
         }
         if let dictationLocale = await DictationTranscriber.supportedLocale(
             equivalentTo: locale
         ) {
-            return .dictation(dictationLocale)
+            candidates.append(.dictation(dictationLocale))
         }
-        return nil
+        return candidates
+    }
+
+    /// Prefer an installed backend, then one that is downloading or downloadable.
+    /// Speech wins ties, while Dictation remains a real fallback when Speech merely
+    /// advertises a locale whose requested asset preset is unsupported.
+    private func preferredBackend(for language: Language) async -> Backend? {
+        let candidates = await backends(for: language)
+        var downloading: Backend?
+        var downloadable: Backend?
+        var unsupported: Backend?
+
+        for candidate in candidates {
+            switch await status(for: candidate, language: language) {
+            case .installed:
+                return candidate
+            case .downloading:
+                downloading = downloading ?? candidate
+            case .downloadable:
+                downloadable = downloadable ?? candidate
+            case .unsupported:
+                unsupported = unsupported ?? candidate
+            }
+        }
+
+        return downloading ?? downloadable ?? unsupported
+    }
+
+    private func status(
+        for backend: Backend,
+        language: Language
+    ) async -> SpeechResourceStatus {
+        switch backend {
+        case .speech(let locale):
+            for installedLocale in await SpeechTranscriber.installedLocales
+            where Self.matches(installedLocale, language: language) {
+                let module = SpeechTranscriber(
+                    locale: installedLocale,
+                    preset: .progressiveTranscription
+                )
+                if await AssetInventory.status(forModules: [module]) == .installed {
+                    return .installed
+                }
+            }
+            return await Self.resourceStatus(
+                for: SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
+            )
+        case .dictation(let locale):
+            for installedLocale in await DictationTranscriber.installedLocales
+            where Self.matches(installedLocale, language: language) {
+                let module = DictationTranscriber(
+                    locale: installedLocale,
+                    preset: .progressiveLongDictation
+                )
+                if await AssetInventory.status(forModules: [module]) == .installed {
+                    return .installed
+                }
+            }
+            return await Self.resourceStatus(
+                for: DictationTranscriber(locale: locale, preset: .progressiveLongDictation)
+            )
+        }
     }
 
     private func install(

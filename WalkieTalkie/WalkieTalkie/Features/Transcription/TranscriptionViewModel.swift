@@ -408,7 +408,6 @@ final class TranscriptionViewModel {
             } else {
                 status = await pipeline.speechResourceStatus(for: language)
             }
-            guard status != .unsupported else { continue }
             resources.append(SpeechModelResource(language: language, status: status))
         }
 
