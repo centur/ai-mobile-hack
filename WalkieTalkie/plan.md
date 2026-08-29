@@ -1,6 +1,6 @@
 # WalkieTalkie Translation App — Implementation Plan
 
-Status: **Planning only — awaiting owner selection of phases and order**  
+Status: **In progress — speech-to-text backend selected first**
 Last updated: 2026-08-29  
 Target: iOS/iPadOS 26.5+, SwiftUI, Swift 6-compatible concurrency
 
@@ -8,9 +8,8 @@ Target: iOS/iPadOS 26.5+, SwiftUI, Swift 6-compatible concurrency
 
 Build a privacy-first translation app with the core experience of Apple Translate:
 
-- typed text → translated text;
 - spoken audio → live source transcript → translated text;
-- translated-text playback;
+- text-only translated output for the initial product;
 - a two-person walkie-talkie/conversation mode;
 - downloadable language resources and a clearly reported offline-ready state;
 - replaceable service boundaries so Apple frameworks can later be swapped for or supplemented by providers such as ElevenLabs or another language model.
@@ -19,19 +18,21 @@ Apple's frameworks are the initial providers. Application features must depend o
 
 ## 2. Current Project State
 
-- `WalkieTalkie` is a new SwiftUI app containing only the generated app entry point and placeholder `ContentView`.
+- `WalkieTalkie` still has the generated placeholder UI; no product UI has been selected or implemented yet.
 - Deployment target is iOS 26.5; the local toolchain is Xcode 26.6 with an iOS 26.5 simulator runtime.
 - The app targets iPhone and iPad.
-- There are currently no unit/UI test targets, permissions, persistence model, or app architecture to migrate.
+- The project now compiles in Swift 6 mode and includes a microphone privacy usage description.
+- The first speech backend slice is implemented: provider-neutral audio/transcript contracts, Apple microphone capture, on-device `SpeechAnalyzer`/`SpeechTranscriber`, Speech asset status/download preparation, format conversion, finalization, and cancellation.
+- Physical-device speech verification, interruption/route handling, UI, test targets, translation, synthesis, and persistence remain pending.
 
 ## 3. Product Scope
 
 ### Core scope
 
 1. Choose source and target languages and swap them.
-2. Enter or paste source text and translate it.
-3. Hold/tap to capture speech and show partial/final transcription.
-4. Translate final utterances and optionally speak the result.
+2. Hold/tap to capture speech and show partial/final transcription.
+3. Translate final utterances and display the translated text.
+4. Keep speech synthesis behind a provider boundary for a later phase; it is not part of the initial output.
 5. Run a two-sided conversation with manual turns.
 6. Download/check the speech and translation resources needed for offline use.
 7. Explain unavailable, unsupported, downloading, installed, denied-permission, and failed states.
@@ -51,6 +52,8 @@ These are deliberately separate so they can be scheduled after the core:
 - default-translation-app or system integration, if public APIs/entitlements permit it.
 
 Out of scope unless explicitly selected: Phone/FaceTime interception, Messages integration, AirPods system Live Translation controls, accounts, a custom backend, and cloning Apple branding or pixel-perfect proprietary UI.
+
+Typed source input is explicitly out of scope. Every user-originated translation request begins with captured speech.
 
 ## 4. Technical Direction
 
@@ -158,22 +161,22 @@ Acceptance:
 - A feature model can run end-to-end with deterministic mock transcription, translation, and speech providers.
 - No feature/domain type imports Apple speech/translation frameworks.
 
-### Phase 1 — Text translation vertical slice
+### Phase 1 — Transcript-to-translation vertical slice
 
 Dependencies: Phase 0  
 Estimate: medium
 
-- Build source/target language selectors, swap action, text editor, result card, loading/error/retry states, copy, and translated-text playback entry point.
+- Build source/target language selectors, swap action, transcript/result cards, loading/error/retry states, and copy.
 - Implement the Apple Translation adapter and supported-language mapping.
-- Debounce typed translation while still allowing explicit submit.
+- Accept only finalized speech transcripts as translation input.
 - Guard same-language and unsupported-pair cases.
 
 Acceptance:
 
-- User can type text, translate it, swap languages, and copy the result.
+- A finalized voice transcript can be translated, languages can be swapped, and the result can be copied.
 - Stale requests cannot replace a newer result.
 - Unsupported/not-installed states provide a meaningful next action.
-- Mock-driven tests cover success, cancellation, failure, and rapid input changes.
+- Mock-driven tests cover success, cancellation, failure, and rapid successive utterances.
 
 ### Phase 2 — Offline language resource management
 
@@ -200,7 +203,8 @@ Note: model downloads and microphone behavior require physical-device verificati
 Dependencies: Phase 0; Phase 2 recommended  
 Estimate: large
 
-- Implement audio capture, audio format conversion, `SpeechAnalyzer`, `SpeechTranscriber`, and Speech asset preparation.
+- **Selected first:** implement the backend before its push-to-talk UI.
+- Implement audio capture, audio format conversion, `SpeechAnalyzer`, `SpeechTranscriber`, and Speech asset preparation behind app-owned interfaces.
 - Add first-use microphone permission UX and Settings recovery.
 - Add push-to-talk/tap-to-talk controls, live partial transcript, finalization, cancel, audio-level feedback, interruption, and route handling.
 - Feed only finalized utterances into translation by default; keep partial-translation experimentation behind a setting.
@@ -212,9 +216,9 @@ Acceptance:
 - Denied permission, incoming interruption, route change, backgrounding, unsupported locale, and missing assets end in recoverable UI states.
 - No captured audio is persisted or sent to a server by the Apple provider.
 
-### Phase 4 — Speech synthesis
+### Phase 4 — Speech synthesis (deferred)
 
-Dependencies: Phase 0; commonly delivered with Phase 1  
+Dependencies: Phase 0; not required for the initial text-output product
 Estimate: small/medium
 
 - Implement the Apple synthesizer adapter and installed-voice discovery.
@@ -309,21 +313,21 @@ Acceptance:
 
 Choose one; it is not assumed until approved.
 
-### Option A — Fastest useful MVP (recommended)
+### Option A — Voice-first MVP (selected direction)
 
-`0 → 1 + 4 → 2 → 3 → 5`
+`0 + speech backend from 3 → speech UI from 3 → 2 → 1 → 5`
 
-This validates translation and provider seams early, then adds verified offline assets and the walkie-talkie pipeline.
+This validates the on-device voice pipeline and provider seam first, then adds verified offline state, translation, and the walkie-talkie experience. Phase 4 remains deferred.
 
 ### Option B — Offline risk first
 
-`0 → 2 → 3 → 1 + 4 → 5`
+`0 → 2 → 3 → 1 → 5 → 4 (optional)`
 
 This tackles model availability, downloads, and physical-device constraints before substantial UI work.
 
 ### Option C — Broad Apple Translate parity
 
-`0 → 1 + 4 → 2 → 3 → 5 → 6 → 7 → 8 → 9`
+`0 → 3 → 2 → 1 → 5 → 6 → 7 → 8 → 4 (optional) → 9`
 
 This includes the major standalone Translate-app surfaces. Camera translation and alternative providers remain explicit checkpoints because of their size and risk.
 
@@ -332,7 +336,7 @@ This includes the major standalone Translate-app surfaces. Camera translation an
 - Unit tests: language mapping, availability aggregation, state machine transitions, cancellation, stale-result suppression, provider fallback, and persistence.
 - Contract tests: run the same behavioral suite against mocks and each provider adapter where feasible.
 - Integration tests: Apple translation sessions, Speech asset state, live audio finalization, synthesizer lifecycle, and audio interruptions.
-- UI tests: type/translate, language swap, permission denial, download prompt/status, push-to-talk, alternating turns, offline-state messaging, Dynamic Type, and VoiceOver identifiers.
+- UI tests: speak/transcribe/translate, language swap, permission denial, download prompt/status, push-to-talk, alternating turns, offline-state messaging, Dynamic Type, and VoiceOver identifiers.
 - Manual physical-device matrix: Apple Intelligence capable/non-capable device if available; downloaded/not-downloaded pair; Wi-Fi/cellular/airplane mode; speaker/wired/Bluetooth routes; interruption/backgrounding; quiet/noisy rooms.
 - Build gate after every phase: clean Debug build, unit tests, and selected UI smoke tests on iPhone and iPad simulators; device-only checklist for speech/offline phases.
 
@@ -351,7 +355,7 @@ This includes the major standalone Translate-app surfaces. Camera translation an
 
 The core is complete when Phases 0–5 are approved and delivered, and:
 
-- text and voice translation work for a supported selected pair;
+- voice transcription and transcript-to-text translation work for a supported selected pair;
 - two participants can complete a manual walkie-talkie conversation;
 - installed/downloadable/unsupported states are accurate and actionable;
 - an airplane-mode physical-device test passes after all required resources are installed;
@@ -378,9 +382,8 @@ Primary Apple references used for this plan:
 
 ## 11. Approval Checkpoint
 
-No implementation phase starts until the owner selects:
+No additional implementation phase starts until the owner selects:
 
 1. the phase(s) to implement next;
 2. their order (or one recommended order above);
 3. answers to any decision in Section 8 that affects the selected phase.
-
