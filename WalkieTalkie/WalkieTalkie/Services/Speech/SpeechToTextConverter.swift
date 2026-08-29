@@ -17,6 +17,10 @@ actor SpeechToTextConverter {
         await transcriber.supportedLanguages()
     }
 
+    func installedLanguages() async -> [Language] {
+        await transcriber.installedLanguages()
+    }
+
     func resourceStatus(for language: Language) async -> SpeechResourceStatus {
         await transcriber.resourceStatus(for: language)
     }

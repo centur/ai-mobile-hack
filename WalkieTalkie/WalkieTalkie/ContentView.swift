@@ -265,6 +265,6 @@ struct ContentView: View {
     }
 }
 
-#Preview("Landscape", traits: .landscapeLeft) {
+#Preview("Landscape", traits: .landscapeRight) {
     ContentView()
 }

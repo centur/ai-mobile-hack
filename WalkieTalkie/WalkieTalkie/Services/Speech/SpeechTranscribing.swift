@@ -2,6 +2,7 @@ import Foundation
 
 protocol SpeechTranscribing: Sendable {
     func supportedLanguages() async -> [Language]
+    func installedLanguages() async -> [Language]
     func resourceStatus(for language: Language) async -> SpeechResourceStatus
     func prepare(language: Language) async throws
     func transcribe(

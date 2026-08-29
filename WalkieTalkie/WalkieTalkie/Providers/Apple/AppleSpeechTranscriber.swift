@@ -15,6 +15,24 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
             .sorted { $0.identifier < $1.identifier }
     }
 
+    func installedLanguages() async -> [Language] {
+        guard SpeechTranscriber.isAvailable else { return [] }
+
+        let locales = await SpeechTranscriber.installedLocales
+        let languages = locales.compactMap { locale -> Language? in
+            let identifier = locale.identifier(.bcp47)
+            guard !identifier.isEmpty,
+                  identifier.caseInsensitiveCompare("und") != .orderedSame else {
+                return nil
+            }
+            return Language(identifier: identifier)
+        }
+
+        return Array(Set(languages)).sorted {
+            $0.displayName().localizedCaseInsensitiveCompare($1.displayName()) == .orderedAscending
+        }
+    }
+
     func resourceStatus(for language: Language) async -> SpeechResourceStatus {
         guard SpeechTranscriber.isAvailable else { return .unsupported }
         guard let locale = await supportedLocale(for: language) else { return .unsupported }

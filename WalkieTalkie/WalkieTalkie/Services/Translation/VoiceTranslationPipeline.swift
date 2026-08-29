@@ -23,18 +23,7 @@ actor VoiceTranslationPipeline {
 
     /// Languages whose Speech assets are already installed on this device.
     func installedSpeechLanguages() async -> [Language] {
-        let supported = await speechConverter.supportedLanguages()
-        var installed: [Language] = []
-
-        for language in supported {
-            if await speechConverter.resourceStatus(for: language) == .installed {
-                installed.append(language)
-            }
-        }
-
-        return installed.sorted {
-            $0.displayName().localizedCaseInsensitiveCompare($1.displayName()) == .orderedAscending
-        }
+        await speechConverter.installedLanguages()
     }
 
     func speechResourceStatus(for language: Language) async -> SpeechResourceStatus {
