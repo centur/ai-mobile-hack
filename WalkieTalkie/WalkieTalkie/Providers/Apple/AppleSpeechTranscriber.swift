@@ -65,16 +65,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
         if statuses.contains(.installed) { return .installed }
         if statuses.contains(.downloading) { return .downloading }
-        if statuses.contains(.downloadable) {
-            do {
-                try await download(language:language)
-                print("Model for \(language) successfully prepared")
-            } catch {
-                print("Could not install model: \(error)")
-                return .unsupported
-            }
-            return .installed
-        }
+        if statuses.contains(.downloadable) { return .downloadable }
 
         return .unsupported
     }
@@ -354,6 +345,17 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         locale: Locale,
         language: Language
     ) async throws {
+        let reservedLocales = await AssetInventory.reservedLocales
+        let alreadyReserved = reservedLocales.contains {
+            Self.matches($0, language: language)
+        }
+        guard alreadyReserved
+                || reservedLocales.count < AssetInventory.maximumReservedLocales else {
+            throw SpeechBackendError.localeReservationLimitReached(
+                maximum: AssetInventory.maximumReservedLocales
+            )
+        }
+
         _ = try await AssetInventory.reserve(locale: locale)
         if let request = try await AssetInventory.assetInstallationRequest(
             supporting: [module]

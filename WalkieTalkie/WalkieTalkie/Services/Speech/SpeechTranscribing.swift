@@ -23,6 +23,7 @@ nonisolated enum SpeechBackendError: LocalizedError, Sendable {
     case unsupportedLanguage(String)
     case resourceNotInstalled(String)
     case resourceNotReserved(String)
+    case localeReservationLimitReached(maximum: Int)
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ nonisolated enum SpeechBackendError: LocalizedError, Sendable {
             "The speech model for \(identifier) is not installed."
         case .resourceNotReserved(let identifier):
             "The speech model for \(identifier) is managed by the system or another app and cannot be removed here."
+        case .localeReservationLimitReached(let maximum):
+            "This app can reserve at most \(maximum) Speech languages at once. Release an unused language in Offline Speech Models, then try again."
         }
     }
 }
