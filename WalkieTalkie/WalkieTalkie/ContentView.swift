@@ -11,12 +11,25 @@ struct ContentView: View {
     @State private var viewModel = TranscriptionViewModel()
 
     var body: some View {
-        VStack(spacing: 48) {
-            Text(viewModel.transcript)
-                .font(.title2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 120)
-                .accessibilityIdentifier("transcriptLabel")
+        VStack(spacing: 32) {
+            VStack(spacing: 20) {
+                Text(viewModel.sourceLanguageText)
+                    .font(.title2)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 100)
+                    .accessibilityLabel("Original text")
+                    .accessibilityIdentifier("sourceLanguageTextLabel")
+
+                Divider()
+
+                Text(viewModel.targetLanguageText)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 100)
+                    .accessibilityLabel("Indonesian translation")
+                    .accessibilityIdentifier("targetLanguageTextLabel")
+            }
 
             Button {
                 viewModel.toggleCapture()

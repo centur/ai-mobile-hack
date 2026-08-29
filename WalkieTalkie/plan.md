@@ -1,6 +1,6 @@
 # WalkieTalkie Translation App — Implementation Plan
 
-Status: **In progress — speech-to-text backend selected first**
+Status: **In progress — speech-to-text plus Indonesian translation demo**
 Last updated: 2026-08-29  
 Target: iOS/iPadOS 26.5+, SwiftUI, Swift 6-compatible concurrency
 
@@ -18,13 +18,14 @@ Apple's frameworks are the initial providers. Application features must depend o
 
 ## 2. Current Project State
 
-- `WalkieTalkie` now has the selected minimal transcription UI: one microphone button and one transcript label.
+- `WalkieTalkie` now has one microphone button plus separate original-transcript and Indonesian-translation labels.
 - Deployment target is iOS 26.5; the local toolchain is Xcode 26.6 with an iOS 26.5 simulator runtime.
 - The app targets iPhone and iPad.
 - The project now compiles in Swift 6 mode and includes a microphone privacy usage description.
 - The first speech backend slice is implemented: provider-neutral audio/transcript contracts, Apple microphone capture, on-device `SpeechAnalyzer`/`SpeechTranscriber`, Speech asset status/download preparation, format conversion, finalization, and cancellation.
 - The UI prepares the preferred supported language, starts/stops capture, renders partial/final transcript results, reports setup/errors in the same label, and cancels capture when dismissed.
-- Physical-device speech verification, interruption/route handling, test targets, translation, synthesis, and persistence remain pending.
+- The provider-neutral voice pipeline now emits original and translated text together. Apple Translation model availability is checked on device through `LanguageAvailability`; the demo target is fixed to Indonesian (`id`) and final transcripts are translated only when that offline model pair is installed.
+- Physical-device speech/translation verification, Translation model download UX, interruption/route handling, test targets, synthesis, and persistence remain pending.
 
 ## 3. Product Scope
 

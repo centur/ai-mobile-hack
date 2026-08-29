@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class TranscriptionViewModel {
+    static let demoTargetLanguage = Language(identifier: "id")
+
     enum State: Equatable {
         case idle
         case preparing
@@ -11,18 +13,19 @@ final class TranscriptionViewModel {
         case finishing
     }
 
-    private let converter: SpeechToTextConverter
+    private let pipeline: VoiceTranslationPipeline
     private var transcriptionTask: Task<Void, Never>?
 
     private(set) var state: State = .idle
-    private(set) var transcript = "Tap the microphone and start speaking."
+    private(set) var sourceLanguageText = "Tap the microphone and start speaking."
+    private(set) var targetLanguageText = "Indonesian translation will appear here."
 
     var isListening: Bool {
         state == .listening
     }
 
-    init(converter: SpeechToTextConverter = SpeechBackend.makeAppleOnDevice()) {
-        self.converter = converter
+    init(pipeline: VoiceTranslationPipeline = SpeechBackend.makeAppleOnDevice()) {
+        self.pipeline = pipeline
     }
 
     func toggleCapture() {
@@ -44,33 +47,51 @@ final class TranscriptionViewModel {
         state = .idle
 
         Task {
-            await converter.cancel()
+            await pipeline.cancel()
         }
     }
 
     private func startCapture() {
         state = .preparing
-        transcript = "Preparing speech recognition…"
+        sourceLanguageText = "Preparing speech recognition…"
+        targetLanguageText = "Checking installed Indonesian translation models…"
 
         transcriptionTask = Task {
             do {
                 let language = try await preferredSupportedLanguage()
-                let status = await converter.resourceStatus(for: language)
+                let status = await pipeline.speechResourceStatus(for: language)
 
                 if status != .installed {
-                    transcript = "Downloading \(language.displayName())…"
-                    try await converter.prepare(language: language)
+                    sourceLanguageText = "Downloading \(language.displayName()) speech model…"
+                    try await pipeline.prepareSpeech(language: language)
                 }
 
                 try Task.checkCancellation()
-                let results = try await converter.start(language: language)
-                state = .listening
-                transcript = "Listening…"
+                let translationStatus = await pipeline.translationResourceStatus(
+                    from: language,
+                    to: Self.demoTargetLanguage
+                )
+                switch translationStatus {
+                case .installed:
+                    targetLanguageText = "Indonesian model is installed."
+                case .downloadable:
+                    targetLanguageText = "Indonesian model is available but not installed for \(language.displayName())."
+                case .unsupported:
+                    targetLanguageText = "Indonesian translation is unsupported for \(language.displayName())."
+                }
 
-                for try await segment in results {
+                let results = try await pipeline.start(
+                    source: language,
+                    target: Self.demoTargetLanguage
+                )
+                state = .listening
+                sourceLanguageText = "Listening…"
+
+                for try await result in results {
                     try Task.checkCancellation()
-                    if !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        transcript = segment.text
+                    sourceLanguageText = result.sourceLanguageText
+                    if let translation = result.targetLanguageText {
+                        targetLanguageText = translation
                     }
                 }
 
@@ -80,10 +101,10 @@ final class TranscriptionViewModel {
                 state = .idle
                 transcriptionTask = nil
             } catch {
-                transcript = error.localizedDescription
+                targetLanguageText = error.localizedDescription
                 state = .idle
                 transcriptionTask = nil
-                await converter.cancel()
+                await pipeline.cancel()
             }
         }
     }
@@ -92,12 +113,12 @@ final class TranscriptionViewModel {
         state = .finishing
 
         Task {
-            await converter.finish()
+            await pipeline.finish()
         }
     }
 
     private func preferredSupportedLanguage() async throws -> Language {
-        let supported = await converter.supportedLanguages()
+        let supported = await pipeline.supportedSpeechLanguages()
         guard !supported.isEmpty else {
             throw SpeechBackendError.speechTranscriberUnavailable
         }

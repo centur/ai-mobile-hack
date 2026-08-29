@@ -1,8 +1,12 @@
 enum SpeechBackend {
-    static func makeAppleOnDevice() -> SpeechToTextConverter {
-        SpeechToTextConverter(
-            audioCapture: AppleAudioCapture(),
-            transcriber: AppleSpeechTranscriber()
+    static func makeAppleOnDevice() -> VoiceTranslationPipeline {
+        VoiceTranslationPipeline(
+            speechConverter: SpeechToTextConverter(
+                audioCapture: AppleAudioCapture(),
+                transcriber: AppleSpeechTranscriber()
+            ),
+            translator: AppleTextTranslator(),
+            modelInventory: AppleTranslationModelInventory()
         )
     }
 }
