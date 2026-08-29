@@ -23,6 +23,8 @@ final class TranscriptionViewModel {
 
     private let pipeline: VoiceTranslationPipeline
     private var transcriptionTask: Task<Void, Never>?
+    private var captureTransitionTask: Task<Void, Never>?
+    private var captureID: UUID?
     private var languageSelectionTask: Task<Void, Never>?
     private var hasLoadedLanguages = false
 
@@ -33,6 +35,7 @@ final class TranscriptionViewModel {
     private(set) var sourceLanguageText = sourcePrompt
     private(set) var targetLanguageText = targetPrompt
     private(set) var modelStatusText = "Loading installed languages…"
+    private(set) var activeMicrophoneSide: Side?
 
     var topLanguage: Language?
     var bottomLanguage: Language?
@@ -117,38 +120,34 @@ final class TranscriptionViewModel {
         }
     }
 
-    func toggleCapture() {
+    func toggleCapture(for side: Side) {
         switch state {
         case .idle:
-            startCapture()
+            startCapture(for: side)
         case .preparing:
-            cancelCapture()
+            if activeMicrophoneSide == side {
+                cancelCapture()
+            } else {
+                switchCapture(to: side, finalizingCurrentCapture: false)
+            }
         case .listening:
-            finishCapture()
+            if activeMicrophoneSide == side {
+                finishCapture()
+            } else {
+                switchCapture(to: side, finalizingCurrentCapture: true)
+            }
         case .finishing:
             break
         }
     }
 
-    func beginCapture() {
-        guard state == .idle else { return }
-        startCapture()
-    }
-
-    func endCapture() {
-        switch state {
-        case .preparing:
-            cancelCapture()
-        case .listening:
-            finishCapture()
-        case .idle, .finishing:
-            break
-        }
-    }
-
     func cancelCapture() {
+        captureTransitionTask?.cancel()
+        captureTransitionTask = nil
+        captureID = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        activeMicrophoneSide = nil
         state = .idle
 
         Task { await pipeline.cancel() }
@@ -162,12 +161,14 @@ final class TranscriptionViewModel {
         side == .top ? targetLanguageText : sourceLanguageText
     }
 
-    var isMicrophoneActive: Bool {
-        state != .idle
+    func isMicrophoneActive(for side: Side) -> Bool {
+        activeMicrophoneSide == side && (state == .preparing || state == .listening)
     }
 
-    var isMicrophoneEnabled: Bool {
-        guard bottomLanguage != nil, topLanguage != nil else { return false }
+    func isMicrophoneEnabled(for side: Side) -> Bool {
+        guard language(for: side) != nil, language(for: side.opposite) != nil else {
+            return false
+        }
         switch state {
         case .idle, .preparing, .listening:
             return true
@@ -176,9 +177,9 @@ final class TranscriptionViewModel {
         }
     }
 
-    private func startCapture() {
-        guard let source = bottomLanguage,
-              let target = topLanguage else {
+    private func startCapture(for side: Side) {
+        guard let source = language(for: side),
+              let target = language(for: side.opposite) else {
             modelStatusText = "Select two installed languages first."
             return
         }
@@ -188,8 +189,11 @@ final class TranscriptionViewModel {
         }
 
         state = .preparing
-        sourceLanguageText = "Preparing \(source.displayName()) speech recognition…"
-        targetLanguageText = "Checking \(target.displayName()) translation model…"
+        activeMicrophoneSide = side
+        setText("Preparing \(source.displayName()) speech recognition…", for: side)
+        setText("Checking \(target.displayName()) translation model…", for: side.opposite)
+        let captureID = UUID()
+        self.captureID = captureID
 
         transcriptionTask = Task {
             do {
@@ -218,27 +222,38 @@ final class TranscriptionViewModel {
 
                 try Task.checkCancellation()
                 let results = try await pipeline.start(source: source, target: target)
+                guard self.captureID == captureID else { return }
                 state = .listening
-                sourceLanguageText = "Listening in \(source.displayName())…"
-                targetLanguageText = Self.targetPrompt
+                setText("Listening in \(source.displayName())…", for: side)
+                setText(Self.targetPrompt, for: side.opposite)
 
                 for try await result in results {
                     try Task.checkCancellation()
-                    sourceLanguageText = result.sourceLanguageText
+                    guard self.captureID == captureID else { return }
+                    setText(result.sourceLanguageText, for: side)
                     if let translation = result.targetLanguageText {
-                        targetLanguageText = translation
+                        setText(translation, for: side.opposite)
                     }
                 }
 
+                guard self.captureID == captureID else { return }
                 state = .idle
+                activeMicrophoneSide = nil
+                self.captureID = nil
                 transcriptionTask = nil
             } catch is CancellationError {
+                guard self.captureID == captureID else { return }
                 state = .idle
+                activeMicrophoneSide = nil
+                self.captureID = nil
                 transcriptionTask = nil
             } catch {
-                targetLanguageText = error.localizedDescription
+                guard self.captureID == captureID else { return }
+                setText(error.localizedDescription, for: side.opposite)
                 modelStatusText = error.localizedDescription
                 state = .idle
+                activeMicrophoneSide = nil
+                self.captureID = nil
                 transcriptionTask = nil
                 await pipeline.cancel()
             }
@@ -247,7 +262,35 @@ final class TranscriptionViewModel {
 
     private func finishCapture() {
         state = .finishing
+        activeMicrophoneSide = nil
         Task { await pipeline.finish() }
+    }
+
+    private func switchCapture(
+        to side: Side,
+        finalizingCurrentCapture: Bool
+    ) {
+        let previousTask = transcriptionTask
+        activeMicrophoneSide = nil
+        state = .finishing
+
+        captureTransitionTask?.cancel()
+        captureTransitionTask = Task {
+            if finalizingCurrentCapture {
+                await pipeline.finish()
+            } else {
+                captureID = nil
+                previousTask?.cancel()
+                transcriptionTask = nil
+                await pipeline.cancel()
+            }
+            await previousTask?.value
+            guard !Task.isCancelled else { return }
+
+            state = .idle
+            captureTransitionTask = nil
+            startCapture(for: side)
+        }
     }
 
     private func refreshTranslationModelStatus() async {
@@ -282,11 +325,30 @@ final class TranscriptionViewModel {
         targetLanguageText = Self.targetPrompt
     }
 
+    private func language(for side: Side) -> Language? {
+        side == .top ? topLanguage : bottomLanguage
+    }
+
+    private func setText(_ text: String, for side: Side) {
+        if side == .top {
+            targetLanguageText = text
+        } else {
+            sourceLanguageText = text
+        }
+    }
+
     private func reloadInstalledTargets(
         for source: Language,
         preservingSelection: Bool
     ) async {
-        let targets = await pipeline.installedTranslationTargets(from: source)
+        let forwardTargets = await pipeline.installedTranslationTargets(from: source)
+        var targets: [Language] = []
+        for target in forwardTargets where installedSourceLanguages.contains(target) {
+            guard !Task.isCancelled else { return }
+            if await pipeline.translationResourceStatus(from: target, to: source) == .installed {
+                targets.append(target)
+            }
+        }
         guard !Task.isCancelled, bottomLanguage == source else { return }
 
         installedTargetLanguages = targets
@@ -376,5 +438,11 @@ final class TranscriptionViewModel {
         return languages.first {
             Locale(identifier: $0.identifier).language.languageCode == desiredCode
         }
+    }
+}
+
+private extension TranscriptionViewModel.Side {
+    var opposite: Self {
+        self == .top ? .bottom : .top
     }
 }

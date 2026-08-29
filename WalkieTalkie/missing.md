@@ -1,12 +1,10 @@
 # WalkieTalkie — Missing Implementation
 
-This document records the gaps between the current implementation and the scope described in [`plan.md`](plan.md). The app currently provides a one-direction, offline speech-to-translated-text prototype; it is not yet the complete two-person walkie-talkie defined by the plan.
+This document records the gaps between the current implementation and the scope described in [`plan.md`](plan.md). The app currently provides a bidirectional, manual offline speech-to-translated-text prototype; it is not yet the complete two-person walkie-talkie defined by the plan.
 
 ## Highest-priority product gaps
 
-- The blue top side cannot record. Its microphone is a visual indicator only.
 - There is no participant-turn model or conversation timeline.
-- Swapping languages reverses the next bottom-to-top translation, but it does not create true per-side walkie-talkie controls.
 - Translation model downloads cannot be initiated from the app.
 - Speech model preparation exists in the provider but is not connected to the UI.
 - Offline readiness has not been verified on a physical device in airplane mode.
@@ -55,12 +53,12 @@ Missing:
 
 ## Phase 3 — Speech-to-text input
 
-Implemented: microphone permission request, audio capture, mono conversion, `SpeechAnalyzer`, partial/final transcription, hold-to-talk finalization, and cancellation.
+Implemented: microphone permission request, audio capture, mono conversion, `SpeechAnalyzer`, partial/final transcription, tap-to-toggle finalization, per-side capture handoff, and cancellation.
 
 Missing:
 
 - A Settings recovery action after microphone permission is denied.
-- Real microphone-level feedback; the seven-mark indicator currently shows only active/inactive state.
+- Real microphone-level feedback; the pulsing microphone glow currently shows recording state rather than measured input level.
 - Audio interruption handling, including incoming calls and system interruptions.
 - Audio route-change handling for speaker, wired, and Bluetooth devices.
 - Explicit app background/foreground handling.
@@ -81,14 +79,13 @@ Not implemented:
 
 ## Phase 5 — Manual walkie-talkie conversation
 
-Only the two-panel visual shell is present.
+Implemented: two participant panels, per-side tap-to-toggle microphones, bidirectional transcription/translation, and a single-active-microphone handoff that finalizes the current utterance before switching sides.
 
 Missing:
 
-- Interactive push-to-talk controls for both participants.
 - A participant/side associated with every captured turn.
 - A conversation-turn domain model and in-session timeline.
-- Safe rapid alternation without attributing results to the wrong participant.
+- Automated coverage for rapid alternation and participant attribution.
 - Per-turn original and translated text preservation.
 - Retry, replay, copy, and clear-conversation actions.
 - Optional translated speech playback.
