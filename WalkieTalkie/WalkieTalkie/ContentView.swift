@@ -1,10 +1,11 @@
 import SwiftUI
+@preconcurrency import Translation
 
 struct ContentView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var viewModel = TranscriptionViewModel()
     @State private var isSpeechModelManagerPresented = false
-    @State private var isTranslatedToLanguageAlertPresented = false
+    @State private var isTranslationModelManagerPresented = false
 
     private var isCompactLandscape: Bool {
         verticalSizeClass == .compact
@@ -91,8 +92,9 @@ struct ContentView: View {
             SpeechModelManagerView(viewModel: viewModel)
                 .presentationDetents([.large])
         }
-        .alert("Not implemented", isPresented: $isTranslatedToLanguageAlertPresented) {
-            Button("OK", role: .cancel) {}
+        .sheet(isPresented: $isTranslationModelManagerPresented) {
+            TranslationModelManagerView(viewModel: viewModel)
+                .presentationDetents([.large])
         }
     }
 
@@ -148,13 +150,40 @@ struct ContentView: View {
         tint: Color
     ) -> some View {
         if role == .translatedTo {
-            Button {
-                isTranslatedToLanguageAlertPresented = true
+            let languages = viewModel.languages(for: role)
+
+            Menu {
+                if languages.isEmpty {
+                    Text("No supported languages")
+                } else {
+                    ForEach(languages) { language in
+                        Button {
+                            viewModel.select(language, for: role)
+                        } label: {
+                            if language == selection {
+                                Label(language.displayName(), systemImage: "checkmark")
+                            } else {
+                                Text(language.displayName())
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                Button {
+                    isTranslationModelManagerPresented = true
+                } label: {
+                    Label("Download models for offline use", systemImage: "arrow.down.circle")
+                }
             } label: {
                 languageMenuLabel(selection: selection, tint: tint)
             }
-            .buttonStyle(.plain)
-            .disabled(viewModel.state != .idle || viewModel.isLoadingLanguages)
+            .disabled(
+                viewModel.state != .idle
+                    || viewModel.isLoadingLanguages
+                    || viewModel.spokenLanguage == nil
+            )
             .accessibilityLabel("Translated-to language selector")
             .accessibilityIdentifier("translatedToLanguageSelector")
         } else {
@@ -280,6 +309,157 @@ struct ContentView: View {
                     radius: active ? 9 + (12 * pulse) : 3,
                     y: active ? 0 : 1
                 )
+        }
+    }
+}
+
+private struct TranslationModelManagerView: View {
+    @Environment(\.dismiss) private var dismiss
+    let viewModel: TranscriptionViewModel
+
+    @State private var configuration: TranslationSession.Configuration?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isLoadingTranslationModels && viewModel.translationModels.isEmpty {
+                    ProgressView("Loading Translation models…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.translationModels.isEmpty {
+                    ContentUnavailableView(
+                        "No Translation Models Available",
+                        systemImage: "character.book.closed",
+                        description: Text("No translations are supported from the selected spoken language.")
+                    )
+                } else {
+                    List {
+                        Section {
+                            ForEach(viewModel.translationModels) { model in
+                                translationModelRow(model)
+                            }
+                        } footer: {
+                            Text("Translation downloads require system confirmation. Apple requires downloaded Translation models to be removed in Settings.")
+                        }
+                    }
+                    .refreshable {
+                        await viewModel.loadTranslationModels()
+                    }
+                }
+            }
+            .navigationTitle("Offline Translation Models")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .disabled(viewModel.translationModelOperationLanguage != nil)
+                }
+            }
+        }
+        .task {
+            await viewModel.loadTranslationModels()
+        }
+        .translationTask(configuration) { session in
+            guard let language = viewModel.translationModelOperationLanguage else { return }
+
+            let preparationError: Error?
+            do {
+                try await session.prepareTranslation()
+                preparationError = nil
+            } catch {
+                preparationError = error
+            }
+
+            // The system download sheet is a remote view service. Mutating this
+            // view while it is dismissing can interrupt that service (Translation
+            // error 14), so let its dismissal transaction finish first.
+            try? await Task.sleep(for: .milliseconds(500))
+
+            if let preparationError {
+                await viewModel.failTranslationModelDownload(
+                    language,
+                    error: preparationError
+                )
+            } else {
+                await viewModel.finishTranslationModelDownload(language)
+            }
+
+        }
+        .interactiveDismissDisabled(viewModel.translationModelOperationLanguage != nil)
+        .alert(
+            "Translation Models",
+            isPresented: Binding(
+                get: { viewModel.translationModelManagerMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        viewModel.clearTranslationModelManagerMessage()
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                viewModel.clearTranslationModelManagerMessage()
+            }
+        } message: {
+            Text(viewModel.translationModelManagerMessage ?? "")
+        }
+    }
+
+    private func translationModelRow(_ model: TranslationModelResource) -> some View {
+        HStack(spacing: 12) {
+            Text(model.status == .installed ? "🟢" : "🟡")
+                .accessibilityHidden(true)
+
+            Text(model.language.displayName())
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            action(for: model)
+                .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func action(for model: TranslationModelResource) -> some View {
+        if viewModel.translationModelOperationLanguage == model.language {
+            ProgressView()
+                .accessibilityLabel("Downloading \(model.language.displayName())")
+        } else if model.status == .installed {
+            Button {
+                viewModel.showTranslationModelRemovalInstructions(for: model.language)
+            } label: {
+                Text("⛔")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Show removal instructions for \(model.language.displayName()) translation model")
+        } else {
+            Button {
+                requestDownload(of: model.language)
+            } label: {
+                Text("⬇️")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Download \(model.language.displayName()) translation model")
+        }
+    }
+
+    private func requestDownload(of language: Language) {
+        guard let spokenLanguage = viewModel.spokenLanguage else { return }
+        viewModel.beginTranslationModelDownload(language)
+        guard viewModel.translationModelOperationLanguage == language else { return }
+
+        let nextConfiguration = TranslationSession.Configuration(
+            source: Locale.Language(identifier: spokenLanguage.identifier),
+            target: Locale.Language(identifier: language.identifier),
+            preferredStrategy: .lowLatency
+        )
+        if configuration == nextConfiguration {
+            configuration?.invalidate()
+        } else {
+            configuration = nextConfiguration
         }
     }
 }

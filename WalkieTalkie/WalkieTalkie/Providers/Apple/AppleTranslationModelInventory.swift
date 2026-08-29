@@ -6,6 +6,33 @@ import Foundation
 /// `Speech.AssetInventory` cannot report translation assets. Translation exposes
 /// installed model pairs through `LanguageAvailability` instead.
 nonisolated struct AppleTranslationModelInventory: TranslationModelInventorying {
+    nonisolated func supportedTranslatedToLanguages(
+        from spokenLanguage: Language
+    ) async -> [Language] {
+        let availability = LanguageAvailability(preferredStrategy: .lowLatency)
+        let spokenLocaleLanguage = Locale.Language(identifier: spokenLanguage.identifier)
+        let supportedLanguages = await availability.supportedLanguages
+        var supported: Set<Language> = []
+
+        for translatedToLocaleLanguage in supportedLanguages {
+            let translatedToLanguage = Language(
+                identifier: translatedToLocaleLanguage.minimalIdentifier
+            ).baseLanguage
+            guard translatedToLanguage != spokenLanguage.baseLanguage else { continue }
+
+            if await availability.status(
+                from: spokenLocaleLanguage,
+                to: translatedToLocaleLanguage
+            ) != .unsupported {
+                supported.insert(translatedToLanguage)
+            }
+        }
+
+        return supported.sorted {
+            $0.displayName().localizedCaseInsensitiveCompare($1.displayName()) == .orderedAscending
+        }
+    }
+
     nonisolated func installedTranslatedToLanguages(
         from spokenLanguage: Language
     ) async -> [Language] {

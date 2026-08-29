@@ -48,6 +48,10 @@ actor VoiceTranslationPipeline {
         )
     }
 
+    func supportedTranslatedToLanguages(from spokenLanguage: Language) async -> [Language] {
+        await modelInventory.supportedTranslatedToLanguages(from: spokenLanguage)
+    }
+
     func installedTranslatedToLanguages(from spokenLanguage: Language) async -> [Language] {
         await modelInventory.installedTranslatedToLanguages(from: spokenLanguage)
     }

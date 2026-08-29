@@ -31,10 +31,14 @@ final class TranscriptionViewModel {
     private(set) var installedSpokenLanguages: [Language] = []
     private(set) var installedTranslatedToLanguages: [Language] = []
     private(set) var speechModels: [SpeechModelResource] = []
+    private(set) var translationModels: [TranslationModelResource] = []
     private(set) var isLoadingLanguages = false
     private(set) var isLoadingSpeechModels = false
+    private(set) var isLoadingTranslationModels = false
     private(set) var speechModelOperationLanguage: Language?
+    private(set) var translationModelOperationLanguage: Language?
     private(set) var speechModelManagerMessage: String?
+    private(set) var translationModelManagerMessage: String?
     private(set) var spokenLanguageText = spokenPrompt
     private(set) var translatedToLanguageText = translatedToPrompt
     private(set) var modelStatusText = "Loading installed languages…"
@@ -118,6 +122,51 @@ final class TranscriptionViewModel {
 
     func clearSpeechModelManagerMessage() {
         speechModelManagerMessage = nil
+    }
+
+    func loadTranslationModels() async {
+        guard translationModelOperationLanguage == nil else { return }
+        isLoadingTranslationModels = true
+        translationModelManagerMessage = nil
+        await refreshTranslationModels()
+        isLoadingTranslationModels = false
+    }
+
+    func beginTranslationModelDownload(_ language: Language) {
+        guard state == .idle, translationModelOperationLanguage == nil else { return }
+        guard translationModels.contains(where: {
+            $0.language == language && $0.status == .downloadable
+        }) else { return }
+        translationModelOperationLanguage = language
+    }
+
+    func finishTranslationModelDownload(_ language: Language) async {
+        guard translationModelOperationLanguage == language else { return }
+        await refreshTranslationModels()
+        if let spokenLanguage {
+            await reloadInstalledTranslatedToLanguages(
+                for: spokenLanguage,
+                preservingSelection: true
+            )
+        }
+        await updateInterfacePrompts()
+        await refreshTranslationModelStatus()
+        translationModelOperationLanguage = nil
+    }
+
+    func failTranslationModelDownload(_ language: Language, error: Error) async {
+        guard translationModelOperationLanguage == language else { return }
+        translationModelManagerMessage = error.localizedDescription
+        await refreshTranslationModels()
+        translationModelOperationLanguage = nil
+    }
+
+    func showTranslationModelRemovalInstructions(for language: Language) {
+        translationModelManagerMessage = "Apple manages Translation models. To delete the \(language.displayName()) model, open Settings, go to Apps → Translate → Downloaded Languages, then remove it there."
+    }
+
+    func clearTranslationModelManagerMessage() {
+        translationModelManagerMessage = nil
     }
 
     func select(_ language: Language, for role: LanguageRole) {
@@ -227,7 +276,8 @@ final class TranscriptionViewModel {
     }
 
     func isMicrophoneEnabled(for role: LanguageRole) -> Bool {
-        guard language(for: role) != nil else { return false }
+        guard let selectedLanguage = language(for: role),
+              installedSpokenLanguages.contains(selectedLanguage) else { return false }
         if role == .translatedTo, language(for: role.opposite) == nil { return false }
         switch state {
         case .idle, .preparing, .listening:
@@ -408,6 +458,29 @@ final class TranscriptionViewModel {
         speechModels = resources
     }
 
+    private func refreshTranslationModels() async {
+        guard let spokenLanguage else {
+            translationModels = []
+            return
+        }
+
+        let supported = await pipeline.supportedTranslatedToLanguages(from: spokenLanguage)
+        var resources: [TranslationModelResource] = []
+        resources.reserveCapacity(supported.count)
+
+        for language in supported {
+            guard !Task.isCancelled else { return }
+            let status = await pipeline.translationResourceStatus(
+                from: spokenLanguage,
+                to: language
+            )
+            guard status != .unsupported else { continue }
+            resources.append(TranslationModelResource(language: language, status: status))
+        }
+
+        translationModels = resources
+    }
+
     private func updateSpeechModel(_ language: Language, status: SpeechResourceStatus) {
         guard let index = speechModels.firstIndex(where: { $0.language == language }) else {
             return
@@ -464,17 +537,7 @@ final class TranscriptionViewModel {
         for spoken: Language,
         preservingSelection: Bool
     ) async {
-        let forwardTargets = await pipeline.installedTranslatedToLanguages(from: spoken)
-        var translatedToLanguages: [Language] = []
-        for translatedTo in forwardTargets where installedSpokenLanguages.contains(translatedTo) {
-            guard !Task.isCancelled else { return }
-            if await pipeline.translationResourceStatus(
-                from: translatedTo,
-                to: spoken
-            ) == .installed {
-                translatedToLanguages.append(translatedTo)
-            }
-        }
+        let translatedToLanguages = await pipeline.installedTranslatedToLanguages(from: spoken)
         guard !Task.isCancelled, spokenLanguage == spoken else { return }
 
         installedTranslatedToLanguages = translatedToLanguages
