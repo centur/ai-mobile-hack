@@ -54,6 +54,31 @@ actor VoiceTranslationPipeline {
         )
     }
 
+    func offlineReadiness(
+        between firstLanguage: Language,
+        and secondLanguage: Language
+    ) async -> OfflineLanguagePairReadiness {
+        let firstSpeech = await speechConverter.resourceStatus(for: firstLanguage)
+        let secondSpeech = await speechConverter.resourceStatus(for: secondLanguage)
+        let firstToSecond = await modelInventory.resourceStatus(
+            from: firstLanguage,
+            to: secondLanguage
+        )
+        let secondToFirst = await modelInventory.resourceStatus(
+            from: secondLanguage,
+            to: firstLanguage
+        )
+
+        return OfflineLanguagePairReadiness(
+            firstLanguage: firstLanguage,
+            secondLanguage: secondLanguage,
+            firstSpeech: firstSpeech,
+            secondSpeech: secondSpeech,
+            firstToSecondTranslation: firstToSecond,
+            secondToFirstTranslation: secondToFirst
+        )
+    }
+
     func supportedTranslatedToLanguages(from spokenLanguage: Language) async -> [Language] {
         await modelInventory.supportedTranslatedToLanguages(from: spokenLanguage)
     }

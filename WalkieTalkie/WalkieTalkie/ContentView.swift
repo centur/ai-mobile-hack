@@ -424,7 +424,7 @@ private struct TranslationModelManagerView: View {
                                 translationModelRow(model)
                             }
                         } footer: {
-                            Text("Translation downloads require system confirmation. Apple requires downloaded Translation models to be removed in Settings.")
+                            Text("Preparing a language installs its Speech asset and Translation resources for both directions. Translation downloads require system confirmation; Apple manages their removal in Settings.")
                         }
                     }
                     .refreshable {
@@ -447,7 +447,7 @@ private struct TranslationModelManagerView: View {
             await viewModel.loadTranslationModels()
         }
         .translationTask(configuration) { session in
-            guard let language = viewModel.translationModelOperationLanguage else { return }
+            guard let request = viewModel.pendingTranslationDownload else { return }
 
             let preparationError: Error?
             do {
@@ -464,13 +464,27 @@ private struct TranslationModelManagerView: View {
 
             if let preparationError {
                 await viewModel.failTranslationModelDownload(
-                    language,
+                    request,
                     error: preparationError
                 )
             } else {
-                await viewModel.finishTranslationModelDownload(language)
+                await viewModel.finishTranslationModelDownload(request)
             }
 
+        }
+        .onChange(of: viewModel.pendingTranslationDownload, initial: true) {
+            _, request in
+            guard let request else { return }
+            let nextConfiguration = TranslationSession.Configuration(
+                source: Locale.Language(identifier: request.source.identifier),
+                target: Locale.Language(identifier: request.target.identifier),
+                preferredStrategy: .lowLatency
+            )
+            if configuration == nextConfiguration {
+                configuration?.invalidate()
+            } else {
+                configuration = nextConfiguration
+            }
         }
         .interactiveDismissDisabled(viewModel.translationModelOperationLanguage != nil)
         .alert(
@@ -494,10 +508,15 @@ private struct TranslationModelManagerView: View {
 
     private func translationModelRow(_ model: TranslationModelResource) -> some View {
         HStack(spacing: 12) {
-            Text(model.status == .installed ? "🟢" : "🟡")
+            Text(readinessSymbol(for: model))
                 .accessibilityHidden(true)
 
-            Text(model.language.displayName())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.language.displayName())
+                Text(readinessDescription(for: model))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             action(for: model)
@@ -510,43 +529,64 @@ private struct TranslationModelManagerView: View {
     private func action(for model: TranslationModelResource) -> some View {
         if viewModel.translationModelOperationLanguage == model.language {
             ProgressView()
-                .accessibilityLabel("Downloading \(model.language.displayName())")
-        } else if model.status == .installed {
+                .accessibilityLabel("Preparing \(model.language.displayName()) for two-way offline use")
+        } else if model.readiness.isFullyReady {
             Button {
                 viewModel.showTranslationModelRemovalInstructions(for: model.language)
             } label: {
-                Text("⛔")
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
                     .font(.title3)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Show removal instructions for \(model.language.displayName()) translation model")
+            .accessibilityLabel("\(model.language.displayName()) is ready for two-way offline use")
+        } else if !model.readiness.isBidirectionallySupported {
+            Image(systemName: "xmark.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Two-way offline use is unsupported")
         } else {
             Button {
-                requestDownload(of: model.language)
+                Task {
+                    await viewModel.prepareOfflinePair(with: model.language)
+                }
             } label: {
                 Text("⬇️")
                     .font(.title3)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Download \(model.language.displayName()) translation model")
+            .accessibilityLabel("Prepare \(model.language.displayName()) for two-way offline use")
         }
     }
 
-    private func requestDownload(of language: Language) {
-        guard let spokenLanguage = viewModel.spokenLanguage else { return }
-        viewModel.beginTranslationModelDownload(language)
-        guard viewModel.translationModelOperationLanguage == language else { return }
+    private func readinessSymbol(for model: TranslationModelResource) -> String {
+        if model.readiness.isFullyReady { return "🟢" }
+        if model.readiness.isBidirectionallySupported { return "🟡" }
+        return "⚪️"
+    }
 
-        let nextConfiguration = TranslationSession.Configuration(
-            source: Locale.Language(identifier: spokenLanguage.identifier),
-            target: Locale.Language(identifier: language.identifier),
-            preferredStrategy: .lowLatency
-        )
-        if configuration == nextConfiguration {
-            configuration?.invalidate()
-        } else {
-            configuration = nextConfiguration
+    private func readinessDescription(for model: TranslationModelResource) -> String {
+        let readiness = model.readiness
+        if readiness.isFullyReady {
+            return "Speech and Translation ready in both directions"
         }
+        guard readiness.isBidirectionallySupported else {
+            return "Two-way offline use is unsupported"
+        }
+
+        var missing: [String] = []
+        if readiness.firstSpeech != .installed {
+            missing.append("source Speech")
+        }
+        if readiness.secondSpeech != .installed {
+            missing.append("target Speech")
+        }
+        if readiness.firstToSecondTranslation != .installed {
+            missing.append("outbound Translation")
+        }
+        if readiness.secondToFirstTranslation != .installed {
+            missing.append("return Translation")
+        }
+        return "Needs " + missing.joined(separator: ", ")
     }
 }
 

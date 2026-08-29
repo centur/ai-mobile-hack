@@ -38,6 +38,8 @@ final class TranscriptionViewModel {
     private(set) var isLoadingTranslationModels = false
     private(set) var speechModelOperationLanguage: Language?
     private(set) var translationModelOperationLanguage: Language?
+    private(set) var pendingTranslationDownload: TranslationDownloadRequest?
+    private(set) var selectedPairReadiness: OfflineLanguagePairReadiness?
     private(set) var speechModelManagerMessage: String?
     private(set) var translationModelManagerMessage: String?
     private(set) var spokenLanguageText = spokenPrompt
@@ -139,33 +141,75 @@ final class TranscriptionViewModel {
         isLoadingTranslationModels = false
     }
 
-    func beginTranslationModelDownload(_ language: Language) {
+    func prepareOfflinePair(with language: Language) async {
         guard state == .idle, translationModelOperationLanguage == nil else { return }
-        guard translationModels.contains(where: {
-            $0.language == language && $0.status == .downloadable
-        }) else { return }
-        translationModelOperationLanguage = language
-    }
-
-    func finishTranslationModelDownload(_ language: Language) async {
-        guard translationModelOperationLanguage == language else { return }
-        await refreshTranslationModels()
-        if let spokenLanguage {
-            await reloadInstalledTranslatedToLanguages(
-                for: spokenLanguage,
-                preservingSelection: true
-            )
+        guard let model = translationModels.first(where: { $0.language == language }) else {
+            return
         }
-        await updateInterfacePrompts()
-        await refreshTranslationModelStatus()
-        translationModelOperationLanguage = nil
+        guard model.readiness.isBidirectionallySupported else {
+            translationModelManagerMessage = "Two-way offline use with \(language.displayName()) is not supported on this device."
+            return
+        }
+
+        translationModelOperationLanguage = language
+        translationModelManagerMessage = nil
+
+        do {
+            if model.readiness.firstSpeech != .installed {
+                try await pipeline.prepareSpeech(language: model.readiness.firstLanguage)
+            }
+            if model.readiness.secondSpeech != .installed {
+                try await pipeline.prepareSpeech(language: model.readiness.secondLanguage)
+            }
+            await continueOfflinePairPreparation(with: language)
+        } catch {
+            await failOfflinePairPreparation(error: error)
+        }
     }
 
-    func failTranslationModelDownload(_ language: Language, error: Error) async {
-        guard translationModelOperationLanguage == language else { return }
-        translationModelManagerMessage = error.localizedDescription
-        await refreshTranslationModels()
-        translationModelOperationLanguage = nil
+    func finishTranslationModelDownload(_ request: TranslationDownloadRequest) async {
+        guard pendingTranslationDownload == request,
+              let language = translationModelOperationLanguage,
+              let spokenLanguage else { return }
+        pendingTranslationDownload = nil
+
+        // The system download sheet can finish just before LanguageAvailability
+        // publishes its new state. Wait briefly instead of launching the same
+        // download again or claiming readiness prematurely.
+        var requestIsInstalled = false
+        for attempt in 0..<5 {
+            let readiness = await pipeline.offlineReadiness(
+                between: spokenLanguage,
+                and: language
+            )
+            if readiness.translationStatus(
+                from: request.source,
+                to: request.target
+            ) == .installed {
+                requestIsInstalled = true
+                break
+            }
+            if attempt < 4 {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+        }
+
+        guard requestIsInstalled else {
+            translationModelManagerMessage = "The system download finished, but iOS has not reported the Translation model as installed. Pull to refresh and try again."
+            await refreshTranslationModels()
+            translationModelOperationLanguage = nil
+            await refreshTranslationModelStatus()
+            return
+        }
+        await continueOfflinePairPreparation(with: language)
+    }
+
+    func failTranslationModelDownload(
+        _ request: TranslationDownloadRequest,
+        error: Error
+    ) async {
+        guard pendingTranslationDownload == request else { return }
+        await failOfflinePairPreparation(error: error)
     }
 
     func showTranslationModelRemovalInstructions(for language: Language) {
@@ -294,7 +338,11 @@ final class TranscriptionViewModel {
     func isMicrophoneEnabled(for role: LanguageRole) -> Bool {
         guard let selectedLanguage = language(for: role),
               installedSpokenLanguages.contains(selectedLanguage) else { return false }
-        if role == .translatedTo, language(for: role.opposite) == nil { return false }
+        guard let otherLanguage = language(for: role.opposite),
+              selectedPairReadiness?.translationStatus(
+                from: selectedLanguage,
+                to: otherLanguage
+              ) == .installed else { return false }
         switch state {
         case .idle, .preparing, .listening:
             return true
@@ -330,12 +378,25 @@ final class TranscriptionViewModel {
                 }
 
                 var translationLanguage: Language?
-                if let captureTranslatedToLanguage,
-                   await pipeline.translationResourceStatus(
+                if let captureTranslatedToLanguage {
+                    let translationStatus = await pipeline.translationResourceStatus(
                        from: captureSpokenLanguage,
                        to: captureTranslatedToLanguage
-                   ) == .installed {
-                    translationLanguage = captureTranslatedToLanguage
+                    )
+                    switch translationStatus {
+                    case .installed:
+                        translationLanguage = captureTranslatedToLanguage
+                    case .downloadable:
+                        throw TranslationBackendError.modelNotInstalled(
+                            spokenLanguage: captureSpokenLanguage.displayName(),
+                            translatedToLanguage: captureTranslatedToLanguage.displayName()
+                        )
+                    case .unsupported:
+                        throw TranslationBackendError.unsupportedPair(
+                            spokenLanguage: captureSpokenLanguage.displayName(),
+                            translatedToLanguage: captureTranslatedToLanguage.displayName()
+                        )
+                    }
                 }
 
                 try Task.checkCancellation()
@@ -376,6 +437,7 @@ final class TranscriptionViewModel {
                 self.captureID = nil
                 transcriptionTask = nil
                 await pipeline.cancel()
+                await refreshTranslationModelStatus()
             }
         }
     }
@@ -415,28 +477,32 @@ final class TranscriptionViewModel {
 
     private func refreshTranslationModelStatus() async {
         guard let translatedToLanguage, let spokenLanguage else {
+            selectedPairReadiness = nil
             modelStatusText = installedSpokenLanguages.isEmpty
                 ? "Install a Speech language in Settings."
                 : "Select an installed offline language pair."
             return
         }
         guard translatedToLanguage != spokenLanguage else {
+            selectedPairReadiness = nil
             modelStatusText = "Spoken and translated-to languages must be different."
             return
         }
 
-        let spokenToTranslated = await pipeline.translationResourceStatus(
-            from: spokenLanguage,
-            to: translatedToLanguage
+        let readiness = await pipeline.offlineReadiness(
+            between: spokenLanguage,
+            and: translatedToLanguage
         )
+        guard self.spokenLanguage == spokenLanguage,
+              self.translatedToLanguage == translatedToLanguage else { return }
+        selectedPairReadiness = readiness
 
-        switch spokenToTranslated {
-        case .installed:
-            modelStatusText = "\(spokenLanguage.displayName()) → \(translatedToLanguage.displayName()) is ready offline."
-        case .downloadable:
-            modelStatusText = "The spoken-to-translated translation model is not downloaded."
-        case .unsupported:
-            modelStatusText = "The selected spoken-to-translated translation is unsupported."
+        if readiness.isFullyReady {
+            modelStatusText = "\(spokenLanguage.displayName()) ↔︎ \(translatedToLanguage.displayName()) is ready offline."
+        } else if !readiness.isBidirectionallySupported {
+            modelStatusText = "Two-way offline use is unsupported for this language pair."
+        } else {
+            modelStatusText = "Download the remaining resources for two-way offline use."
         }
     }
 
@@ -472,15 +538,74 @@ final class TranscriptionViewModel {
 
         for language in supported {
             guard !Task.isCancelled else { return }
-            let status = await pipeline.translationResourceStatus(
-                from: spokenLanguage,
-                to: language
+            let readiness = await pipeline.offlineReadiness(
+                between: spokenLanguage,
+                and: language
             )
-            guard status != .unsupported else { continue }
-            resources.append(TranslationModelResource(language: language, status: status))
+            resources.append(
+                TranslationModelResource(language: language, readiness: readiness)
+            )
         }
 
         translationModels = resources
+    }
+
+    private func continueOfflinePairPreparation(with language: Language) async {
+        guard translationModelOperationLanguage == language,
+              let spokenLanguage else { return }
+
+        let readiness = await pipeline.offlineReadiness(
+            between: spokenLanguage,
+            and: language
+        )
+        updateTranslationModel(language, readiness: readiness)
+
+        if readiness.firstToSecondTranslation == .downloadable {
+            pendingTranslationDownload = TranslationDownloadRequest(
+                source: readiness.firstLanguage,
+                target: readiness.secondLanguage
+            )
+            return
+        }
+        if readiness.secondToFirstTranslation == .downloadable {
+            pendingTranslationDownload = TranslationDownloadRequest(
+                source: readiness.secondLanguage,
+                target: readiness.firstLanguage
+            )
+            return
+        }
+        guard readiness.isFullyReady else {
+            translationModelManagerMessage = "The language pair could not be made fully ready for offline use."
+            translationModelOperationLanguage = nil
+            await refreshTranslationModelStatus()
+            return
+        }
+
+        await refreshInstalledLanguageSelections()
+        await refreshTranslationModels()
+        translationModelOperationLanguage = nil
+        await refreshTranslationModelStatus()
+    }
+
+    private func failOfflinePairPreparation(error: Error) async {
+        pendingTranslationDownload = nil
+        translationModelManagerMessage = error.localizedDescription
+        await refreshTranslationModels()
+        translationModelOperationLanguage = nil
+        await refreshTranslationModelStatus()
+    }
+
+    private func updateTranslationModel(
+        _ language: Language,
+        readiness: OfflineLanguagePairReadiness
+    ) {
+        guard let index = translationModels.firstIndex(where: {
+            $0.language == language
+        }) else { return }
+        translationModels[index] = TranslationModelResource(
+            language: language,
+            readiness: readiness
+        )
     }
 
     private func updateSpeechModel(_ language: Language, status: SpeechResourceStatus) {
@@ -519,6 +644,7 @@ final class TranscriptionViewModel {
     }
 
     private func resetConversationText() {
+        selectedPairReadiness = nil
         spokenLanguageText = Self.spokenPrompt
         translatedToLanguageText = Self.translatedToPrompt
     }
