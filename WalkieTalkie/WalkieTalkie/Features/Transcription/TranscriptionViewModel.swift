@@ -108,6 +108,22 @@ final class TranscriptionViewModel {
         }
     }
 
+    func beginCapture() {
+        guard state == .idle else { return }
+        startCapture()
+    }
+
+    func endCapture() {
+        switch state {
+        case .preparing:
+            cancelCapture()
+        case .listening:
+            finishCapture()
+        case .idle, .finishing:
+            break
+        }
+    }
+
     func cancelCapture() {
         transcriptionTask?.cancel()
         transcriptionTask = nil

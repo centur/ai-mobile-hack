@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var viewModel = TranscriptionViewModel()
+    @State private var isSourceMicrophoneHeld = false
 
     private var isCompactLandscape: Bool {
         verticalSizeClass == .compact
@@ -95,7 +96,7 @@ struct ContentView: View {
     ) -> some View {
         HStack(spacing: 28) {
             VStack(alignment: .leading, spacing: isCompactLandscape ? 5 : 9) {
-                Text(side == .top ? "TARGET LANGUAGE" : "SOURCE LANGUAGE")
+                Text(language?.displayName() ?? "Select language")
                     .font(.caption.bold())
                     .foregroundStyle(tint)
 
@@ -119,9 +120,13 @@ struct ContentView: View {
                 languageMenu(side: side, selection: language, tint: tint)
                 if side == .bottom {
                     microphoneButton(tint: tint)
-                    listeningIndicator(active: viewModel.isMicrophoneActive, tint: tint)
+                    speechProcessingIndicator(
+                        active: isSourceMicrophoneHeld && viewModel.isMicrophoneActive,
+                        tint: tint
+                    )
                 } else {
                     targetOutputIndicator(tint: tint)
+                    speechProcessingIndicator(active: false, tint: tint)
                 }
             }
             .frame(width: isCompactLandscape ? 122 : 150)
@@ -186,14 +191,28 @@ struct ContentView: View {
     private func microphoneButton(tint: Color) -> some View {
         let active = viewModel.isMicrophoneActive
 
-        return Button {
-            viewModel.toggleCapture()
-        } label: {
-            microphoneIcon(tint: tint, active: active)
-        }
-        .buttonStyle(.plain)
-        .disabled(!viewModel.isMicrophoneEnabled)
+        return microphoneIcon(tint: tint, active: active)
+        .contentShape(Circle())
+        .onLongPressGesture(
+            minimumDuration: .infinity,
+            maximumDistance: 60,
+            pressing: { isPressing in
+                guard viewModel.isMicrophoneEnabled || !isPressing else { return }
+                isSourceMicrophoneHeld = isPressing
+                if isPressing {
+                    viewModel.beginCapture()
+                } else {
+                    viewModel.endCapture()
+                }
+            },
+            perform: {}
+        )
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(active ? "Stop listening" : "Speak source language")
+        .accessibilityHint("Press and hold to speak")
+        .accessibilityAction {
+            viewModel.toggleCapture()
+        }
         .accessibilityIdentifier("sourceLanguageMicrophoneButton")
     }
 
@@ -204,7 +223,7 @@ struct ContentView: View {
     }
 
     private func microphoneIcon(tint: Color, active: Bool) -> some View {
-        Image(systemName: active ? "stop.fill" : "mic.fill")
+        Image(systemName: "mic.fill")
             .symbolRenderingMode(.monochrome)
             .font(
                 .system(
@@ -227,11 +246,11 @@ struct ContentView: View {
             .shadow(color: tint.opacity(0.16), radius: 3, y: 1)
     }
 
-    private func listeningIndicator(active: Bool, tint: Color) -> some View {
+    private func speechProcessingIndicator(active: Bool, tint: Color) -> some View {
         HStack(spacing: isCompactLandscape ? 5 : 7) {
             ForEach(0..<7, id: \.self) { index in
                 Capsule()
-                    .fill(tint.opacity(active ? 1 : 0.25))
+                    .fill(tint.opacity(index == 0 || index == 6 ? 0.28 : 1))
                     .frame(
                         width: isCompactLandscape ? 5 : 7,
                         height: active && index == 3
@@ -240,7 +259,8 @@ struct ContentView: View {
                     )
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: active)
+        .opacity(active ? 1 : 0)
+        .animation(.easeInOut(duration: 0.12), value: active)
         .accessibilityHidden(true)
     }
 }
