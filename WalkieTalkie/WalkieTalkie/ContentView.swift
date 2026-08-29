@@ -1,5 +1,6 @@
 import SwiftUI
 @preconcurrency import Translation
+import UIKit
 
 struct ContentView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -105,24 +106,7 @@ struct ContentView: View {
         background: Color
     ) -> some View {
         HStack(spacing: 28) {
-            Text(viewModel.text(for: role))
-                .font(
-                    .system(
-                        size: role == .translatedTo
-                            ? (isCompactLandscape ? 36 : 52)
-                            : (isCompactLandscape ? 24 : 34),
-                        weight: role == .translatedTo ? .black : .regular,
-                        design: .rounded
-                    )
-                )
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .accessibilityIdentifier(
-                    role == .translatedTo
-                        ? "translatedToLanguageTextLabel"
-                        : "spokenLanguageTextLabel"
-                )
+            languageText(role: role)
 
             VStack(spacing: isCompactLandscape ? 5 : 14) {
                 languageMenu(role: role, selection: language, tint: tint)
@@ -141,6 +125,31 @@ struct ContentView: View {
                 style: .continuous
             )
         )
+    }
+
+    @ViewBuilder
+    private func languageText(role: TranscriptionViewModel.LanguageRole) -> some View {
+        if role == .translatedTo {
+            AutoScrollingTranslationText(
+                text: viewModel.text(for: role),
+                fontSize: isCompactLandscape ? 36 : 52
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("translatedToLanguageTextLabel")
+        } else {
+            Text(viewModel.text(for: role))
+                .font(
+                    .system(
+                        size: isCompactLandscape ? 24 : 34,
+                        weight: .regular,
+                        design: .rounded
+                    )
+                )
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .accessibilityIdentifier("spokenLanguageTextLabel")
+        }
     }
 
     @ViewBuilder
@@ -339,6 +348,53 @@ struct ContentView: View {
                     radius: active ? 9 + (12 * pulse) : 3,
                     y: active ? 0 : 1
                 )
+        }
+    }
+}
+
+private struct AutoScrollingTranslationText: View {
+    private static let bottomAnchor = "translation-text-bottom"
+    private static let visibleLineCount: CGFloat = 4
+
+    let text: String
+    let fontSize: CGFloat
+
+    private var lineHeight: CGFloat {
+        let systemFont = UIFont.systemFont(ofSize: fontSize, weight: .black)
+        let descriptor = systemFont.fontDescriptor.withDesign(.rounded)
+            ?? systemFont.fontDescriptor
+        return UIFont(descriptor: descriptor, size: fontSize).lineHeight
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(text)
+                        .font(
+                            .system(
+                                size: fontSize,
+                                weight: .black,
+                                design: .rounded
+                            )
+                        )
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomAnchor)
+                }
+            }
+            .frame(height: lineHeight * Self.visibleLineCount)
+            .scrollIndicators(.hidden)
+            .onChange(of: text, initial: true) {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                }
+            }
         }
     }
 }

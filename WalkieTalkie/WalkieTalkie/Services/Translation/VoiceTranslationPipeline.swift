@@ -9,6 +9,7 @@ actor VoiceTranslationPipeline {
     private var silenceTask: Task<Void, Never>?
     private var latestTranscriptText = ""
     private var lastTranslatedText = ""
+    private var accumulatedTranslatedText = ""
 
     init(
         speechConverter: SpeechToTextConverter,
@@ -101,6 +102,7 @@ actor VoiceTranslationPipeline {
         )
         latestTranscriptText = ""
         lastTranslatedText = ""
+        accumulatedTranslatedText = ""
         silenceTask?.cancel()
         silenceTask = nil
 
@@ -211,8 +213,20 @@ actor VoiceTranslationPipeline {
         continuation: AsyncThrowingStream<VoiceTranslationResult, Error>.Continuation
     ) async {
         guard latestTranscriptText == text, lastTranslatedText != text else { return }
+        let untranslatedRemainder: String
+        if !lastTranslatedText.isEmpty, text.hasPrefix(lastTranslatedText) {
+            untranslatedRemainder = String(text.dropFirst(lastTranslatedText.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            untranslatedRemainder = text
+        }
+        guard !untranslatedRemainder.isEmpty else {
+            lastTranslatedText = text
+            return
+        }
+
         let translated = try? await translator.translate(
-            text,
+            untranslatedRemainder,
             from: spokenLanguage,
             to: translatedToLanguage
         )
@@ -222,10 +236,13 @@ actor VoiceTranslationPipeline {
               let translated else { return }
 
         lastTranslatedText = text
+        accumulatedTranslatedText = accumulatedTranslatedText.isEmpty
+            ? translated
+            : "\(accumulatedTranslatedText)\n\(translated)"
         continuation.yield(
             VoiceTranslationResult(
                 spokenLanguageText: text,
-                translatedToLanguageText: translated,
+                translatedToLanguageText: accumulatedTranslatedText,
                 isFinal: true
             )
         )
