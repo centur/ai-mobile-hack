@@ -227,9 +227,8 @@ final class TranscriptionViewModel {
     }
 
     func isMicrophoneEnabled(for role: LanguageRole) -> Bool {
-        guard language(for: role) != nil, language(for: role.opposite) != nil else {
-            return false
-        }
+        guard language(for: role) != nil else { return false }
+        if role == .translatedTo, language(for: role.opposite) == nil { return false }
         switch state {
         case .idle, .preparing, .listening:
             return true
@@ -239,12 +238,12 @@ final class TranscriptionViewModel {
     }
 
     private func startCapture(for role: LanguageRole) {
-        guard let captureSpokenLanguage = language(for: role),
-              let captureTranslatedToLanguage = language(for: role.opposite) else {
-            modelStatusText = "Select two installed languages first."
+        guard let captureSpokenLanguage = language(for: role) else {
+            modelStatusText = "Select an installed speech language first."
             return
         }
-        guard captureSpokenLanguage != captureTranslatedToLanguage else {
+        let captureTranslatedToLanguage = language(for: role.opposite)
+        guard captureTranslatedToLanguage != captureSpokenLanguage else {
             modelStatusText = "Spoken and translated-to languages must be different."
             return
         }
@@ -255,51 +254,46 @@ final class TranscriptionViewModel {
             "Preparing \(captureSpokenLanguage.displayName()) speech recognition…",
             for: role
         )
-        setText(
-            "Checking \(captureTranslatedToLanguage.displayName()) translation model…",
-            for: role.opposite
-        )
+        if let captureTranslatedToLanguage {
+            setText(
+                "Checking \(captureTranslatedToLanguage.displayName()) translation model…",
+                for: role.opposite
+            )
+        }
         let captureID = UUID()
         self.captureID = captureID
 
         transcriptionTask = Task {
             do {
-                guard await pipeline.speechResourceStatus(
-                    for: captureSpokenLanguage
-                ) == .installed else {
+                let speechResourceStatus = await pipeline.speechResourceStatus(for: captureSpokenLanguage)
+                
+                guard speechResourceStatus == .installed else {
                     throw SpeechBackendError.resourceNotInstalled(
                         captureSpokenLanguage.identifier
                     )
                 }
 
-                let translationStatus = await pipeline.translationResourceStatus(
-                    from: captureSpokenLanguage,
-                    to: captureTranslatedToLanguage
-                )
-                switch translationStatus {
-                case .installed:
-                    modelStatusText = "\(captureSpokenLanguage.displayName()) → \(captureTranslatedToLanguage.displayName()) is ready offline."
-                case .downloadable:
-                    throw TranslationBackendError.modelNotInstalled(
-                        spokenLanguage: captureSpokenLanguage.displayName(),
-                        translatedToLanguage: captureTranslatedToLanguage.displayName()
-                    )
-                case .unsupported:
-                    throw TranslationBackendError.unsupportedPair(
-                        spokenLanguage: captureSpokenLanguage.displayName(),
-                        translatedToLanguage: captureTranslatedToLanguage.displayName()
-                    )
+                var translationLanguage: Language?
+                if let captureTranslatedToLanguage,
+                   await pipeline.translationResourceStatus(
+                       from: captureSpokenLanguage,
+                       to: captureTranslatedToLanguage
+                   ) == .installed {
+                    translationLanguage = captureTranslatedToLanguage
                 }
 
                 try Task.checkCancellation()
                 let results = try await pipeline.start(
                     spokenLanguage: captureSpokenLanguage,
-                    translatedToLanguage: captureTranslatedToLanguage
+                    translatedToLanguage: translationLanguage
                 )
                 guard self.captureID == captureID else { return }
                 state = .listening
+                modelStatusText = "Listening in \(captureSpokenLanguage.displayName())…"
                 setText("Listening in \(captureSpokenLanguage.displayName())…", for: role)
-                setText(Self.translatedToPrompt, for: role.opposite)
+                if translationLanguage != nil {
+                    setText(Self.translatedToPrompt, for: role.opposite)
+                }
 
                 for try await result in results {
                     try Task.checkCancellation()
@@ -323,7 +317,7 @@ final class TranscriptionViewModel {
                 transcriptionTask = nil
             } catch {
                 guard self.captureID == captureID else { return }
-                setText(error.localizedDescription, for: role.opposite)
+                setText(error.localizedDescription, for: role)
                 modelStatusText = error.localizedDescription
                 state = .idle
                 activeMicrophoneRole = nil

@@ -85,27 +85,8 @@ actor VoiceTranslationPipeline {
 
     func start(
         spokenLanguage: Language,
-        translatedToLanguage: Language
+        translatedToLanguage: Language?
     ) async throws -> AsyncThrowingStream<VoiceTranslationResult, Error> {
-        let status = await modelInventory.resourceStatus(
-            from: spokenLanguage,
-            to: translatedToLanguage
-        )
-        switch status {
-        case .installed:
-            break
-        case .downloadable:
-            throw TranslationBackendError.modelNotInstalled(
-                spokenLanguage: spokenLanguage.displayName(),
-                translatedToLanguage: translatedToLanguage.displayName()
-            )
-        case .unsupported:
-            throw TranslationBackendError.unsupportedPair(
-                spokenLanguage: spokenLanguage.displayName(),
-                translatedToLanguage: translatedToLanguage.displayName()
-            )
-        }
-
         let transcriptResults = try await speechConverter.start(language: spokenLanguage)
         let (results, continuation) = AsyncThrowingStream<VoiceTranslationResult, Error>.makeStream(
             bufferingPolicy: .bufferingNewest(50)
@@ -117,8 +98,8 @@ actor VoiceTranslationPipeline {
                     let original = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !original.isEmpty else { continue }
 
-                    if segment.isFinal {
-                        let translated = try await translator.translate(
+                    if segment.isFinal, let translatedToLanguage {
+                        let translated = try? await translator.translate(
                             original,
                             from: spokenLanguage,
                             to: translatedToLanguage
@@ -135,7 +116,7 @@ actor VoiceTranslationPipeline {
                             VoiceTranslationResult(
                                 spokenLanguageText: original,
                                 translatedToLanguageText: nil,
-                                isFinal: false
+                                isFinal: segment.isFinal
                             )
                         )
                     }

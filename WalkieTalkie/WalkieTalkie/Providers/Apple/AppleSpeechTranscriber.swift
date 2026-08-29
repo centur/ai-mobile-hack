@@ -59,24 +59,43 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
         var statuses: [SpeechResourceStatus] = []
         for candidate in candidates {
-            statuses.append(await status(for: candidate, language: language))
+            let candidateStatus = await status(for: candidate, language: language)
+            statuses.append(candidateStatus)
         }
 
         if statuses.contains(.installed) { return .installed }
         if statuses.contains(.downloading) { return .downloading }
-        if statuses.contains(.downloadable) { return .downloadable }
+        if statuses.contains(.downloadable) {
+            do {
+                try await download(language:language)
+                print("Model for \(language) successfully prepared")
+            } catch {
+                print("Could not install model: \(error)")
+                return .unsupported
+            }
+            return .installed
+        }
+
         return .unsupported
     }
 
     func prepare(language: Language) async throws {
-        guard let backend = await preferredBackend(for: language) else {
+        guard (await preferredBackend(for: language)) != nil else {
             throw SpeechBackendError.unsupportedLanguage(language.identifier)
         }
 
         if await resourceStatus(for: language) == .installed {
             return
         }
+        
+        try await download(language:language)
+    }
 
+    
+    func download(language: Language) async throws {
+        guard let backend = await preferredBackend(for: language) else {
+            throw SpeechBackendError.unsupportedLanguage(language.identifier)
+        }
         switch backend {
         case .speech(let locale):
             try await install(
@@ -92,7 +111,8 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
             )
         }
     }
-
+    
+    
     func remove(language: Language) async throws {
         let reservedLocales = await AssetInventory.reservedLocales
         let matchingLocales = reservedLocales.filter { Self.matches($0, language: language) }

@@ -225,6 +225,7 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .disabled(!viewModel.isMicrophoneEnabled(for: role))
+        .accessibilityAddTraits(active ? .isSelected : [])
         .accessibilityLabel(
             active
                 ? "Stop listening"
@@ -265,7 +266,12 @@ struct ContentView: View {
                 .background(tint.opacity(active ? 0.22 : 0.12), in: Circle())
                 .overlay {
                     Circle()
-                        .stroke(tint.opacity(active ? 0.65 * (1 - pulse) : 0), lineWidth: 3)
+                        .fill(tint.opacity(active ? 0.12 + (0.10 * pulse) : 0))
+                        .scaleEffect(1 + (0.18 * pulse))
+                }
+                .overlay {
+                    Circle()
+                        .stroke(tint.opacity(active ? 0.85 * (1 - pulse) : 0), lineWidth: 4)
                         .scaleEffect(1 + (0.24 * pulse))
                 }
                 .scaleEffect(1 + (active ? 0.045 * pulse : 0))
