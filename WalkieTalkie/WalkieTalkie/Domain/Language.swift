@@ -22,4 +22,23 @@ nonisolated struct Language: Hashable, Identifiable, Sendable {
     func displayName(in locale: Locale = .current) -> String {
         locale.localizedString(forIdentifier: identifier) ?? identifier
     }
+
+    /// A representative flag for this language's most likely region.
+    var flagEmoji: String {
+        let maximalIdentifier = Locale.Language(identifier: identifier).maximalIdentifier
+        guard let region = Locale(identifier: maximalIdentifier).region?.identifier else {
+            return "🌐"
+        }
+
+        let letters = Array(region.uppercased().unicodeScalars)
+        guard letters.count == 2,
+              letters.allSatisfy({ (65...90).contains($0.value) }) else {
+            return "🌐"
+        }
+
+        let regionalIndicators = letters.compactMap {
+            UnicodeScalar(127_397 + $0.value)
+        }
+        return String(String.UnicodeScalarView(regionalIndicators))
+    }
 }

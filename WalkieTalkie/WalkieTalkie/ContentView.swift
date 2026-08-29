@@ -161,9 +161,9 @@ struct ContentView: View {
                             viewModel.select(language, for: role)
                         } label: {
                             if language == selection {
-                                Label(language.displayName(), systemImage: "checkmark")
+                                Label(languageMenuItemTitle(language), systemImage: "checkmark")
                             } else {
-                                Text(language.displayName())
+                                Text(languageMenuItemTitle(language))
                             }
                         }
                     }
@@ -185,6 +185,7 @@ struct ContentView: View {
                     || viewModel.spokenLanguage == nil
             )
             .accessibilityLabel("Translated-to language selector")
+            .accessibilityValue(selection?.displayName() ?? "No language selected")
             .accessibilityIdentifier("translatedToLanguageSelector")
         } else {
             let languages = viewModel.languages(for: role)
@@ -198,9 +199,9 @@ struct ContentView: View {
                             viewModel.select(language, for: role)
                         } label: {
                             if language == selection {
-                                Label(language.displayName(), systemImage: "checkmark")
+                                Label(languageMenuItemTitle(language), systemImage: "checkmark")
                             } else {
-                                Text(language.displayName())
+                                Text(languageMenuItemTitle(language))
                             }
                         }
                     }
@@ -242,6 +243,7 @@ struct ContentView: View {
             }
             .disabled(viewModel.state != .idle || viewModel.isLoadingLanguages)
             .accessibilityLabel("Select spoken language")
+            .accessibilityValue(selection?.displayName() ?? "No language selected")
             .accessibilityIdentifier("spokenLanguageSelector")
         }
     }
@@ -252,8 +254,8 @@ struct ContentView: View {
                 .font(isCompactLandscape ? .body : .title2)
             HStack(spacing: 5) {
                 Text(
-                    selection?.displayName()
-                        ?? (viewModel.isLoadingLanguages ? "Loading…" : "Select")
+                    selection?.flagEmoji
+                        ?? (viewModel.isLoadingLanguages ? "…" : "🌐")
                 )
                 .lineLimit(1)
                 Image(systemName: "chevron.down")
@@ -263,6 +265,10 @@ struct ContentView: View {
         .font(isCompactLandscape ? .subheadline.bold() : .headline)
         .foregroundStyle(tint)
         .frame(maxWidth: .infinity)
+    }
+
+    private func languageMenuItemTitle(_ language: Language) -> String {
+        "\(language.flagEmoji) \(language.displayName())"
     }
 
     private func microphoneButton(
