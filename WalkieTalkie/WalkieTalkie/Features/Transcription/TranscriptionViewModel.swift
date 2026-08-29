@@ -23,10 +23,12 @@ final class TranscriptionViewModel {
 
     private let pipeline: VoiceTranslationPipeline
     private var transcriptionTask: Task<Void, Never>?
+    private var languageSelectionTask: Task<Void, Never>?
     private var hasLoadedLanguages = false
 
     private(set) var state: State = .idle
-    private(set) var installedLanguages: [Language] = []
+    private(set) var installedSourceLanguages: [Language] = []
+    private(set) var installedTargetLanguages: [Language] = []
     private(set) var isLoadingLanguages = false
     private(set) var sourceLanguageText = sourcePrompt
     private(set) var targetLanguageText = targetPrompt
@@ -46,10 +48,10 @@ final class TranscriptionViewModel {
         modelStatusText = "Checking installed Speech models…"
 
         let languages = await pipeline.installedSpeechLanguages()
-        installedLanguages = languages
-        isLoadingLanguages = false
+        installedSourceLanguages = languages
 
         guard !languages.isEmpty else {
+            isLoadingLanguages = false
             modelStatusText = "No on-device Speech models are installed."
             return
         }
@@ -57,12 +59,8 @@ final class TranscriptionViewModel {
         let deviceLanguage = preferredLanguage(in: languages)
         bottomLanguage = deviceLanguage
 
-        let indonesian = language(matching: "id", in: languages)
-        topLanguage = if indonesian != deviceLanguage {
-            indonesian ?? languages.first(where: { $0 != deviceLanguage })
-        } else {
-            languages.first(where: { $0 != deviceLanguage })
-        }
+        await reloadInstalledTargets(for: deviceLanguage, preservingSelection: false)
+        isLoadingLanguages = false
 
         await updateInterfacePrompts()
         await refreshTranslationModelStatus()
@@ -74,24 +72,48 @@ final class TranscriptionViewModel {
         switch side {
         case .top:
             topLanguage = language
+            resetConversationText()
+            Task {
+                await updateInterfacePrompts()
+                await refreshTranslationModelStatus()
+            }
         case .bottom:
             bottomLanguage = language
-        }
-
-        resetConversationText()
-        Task {
-            await updateInterfacePrompts()
-            await refreshTranslationModelStatus()
+            topLanguage = nil
+            installedTargetLanguages = []
+            resetConversationText()
+            languageSelectionTask?.cancel()
+            languageSelectionTask = Task {
+                isLoadingLanguages = true
+                await reloadInstalledTargets(for: language, preservingSelection: false)
+                guard !Task.isCancelled, bottomLanguage == language else { return }
+                isLoadingLanguages = false
+                await updateInterfacePrompts()
+                await refreshTranslationModelStatus()
+                languageSelectionTask = nil
+            }
         }
     }
 
     func swapLanguages() {
         guard state == .idle else { return }
-        (topLanguage, bottomLanguage) = (bottomLanguage, topLanguage)
+        guard let topLanguage, let bottomLanguage else { return }
+        guard installedSourceLanguages.contains(topLanguage) else {
+            modelStatusText = "The \(topLanguage.displayName()) Speech model is not installed."
+            return
+        }
+
+        (self.topLanguage, self.bottomLanguage) = (bottomLanguage, topLanguage)
         resetConversationText()
-        Task {
+        languageSelectionTask?.cancel()
+        languageSelectionTask = Task {
+            isLoadingLanguages = true
+            await reloadInstalledTargets(for: topLanguage, preservingSelection: true)
+            guard !Task.isCancelled, self.bottomLanguage == topLanguage else { return }
+            isLoadingLanguages = false
             await updateInterfacePrompts()
             await refreshTranslationModelStatus()
+            languageSelectionTask = nil
         }
     }
 
@@ -130,6 +152,10 @@ final class TranscriptionViewModel {
         state = .idle
 
         Task { await pipeline.cancel() }
+    }
+
+    func languages(for side: Side) -> [Language] {
+        side == .bottom ? installedSourceLanguages : installedTargetLanguages
     }
 
     func text(for side: Side) -> String {
@@ -226,9 +252,9 @@ final class TranscriptionViewModel {
 
     private func refreshTranslationModelStatus() async {
         guard let topLanguage, let bottomLanguage else {
-            modelStatusText = installedLanguages.count < 2
-                ? "Install at least two Speech languages in Settings."
-                : "Select two installed languages."
+            modelStatusText = installedSourceLanguages.isEmpty
+                ? "Install a Speech language in Settings."
+                : "Select an installed offline language pair."
             return
         }
         guard topLanguage != bottomLanguage else {
@@ -254,6 +280,25 @@ final class TranscriptionViewModel {
     private func resetConversationText() {
         sourceLanguageText = Self.sourcePrompt
         targetLanguageText = Self.targetPrompt
+    }
+
+    private func reloadInstalledTargets(
+        for source: Language,
+        preservingSelection: Bool
+    ) async {
+        let targets = await pipeline.installedTranslationTargets(from: source)
+        guard !Task.isCancelled, bottomLanguage == source else { return }
+
+        installedTargetLanguages = targets
+        if preservingSelection, let topLanguage, targets.contains(topLanguage) {
+            return
+        }
+
+        let indonesian = language(matching: "id", in: targets)
+        topLanguage = indonesian ?? targets.first
+        if targets.isEmpty {
+            modelStatusText = "No offline Translation models are installed for \(source.displayName())."
+        }
     }
 
     private func updateInterfacePrompts() async {

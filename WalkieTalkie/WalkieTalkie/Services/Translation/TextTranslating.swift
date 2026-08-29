@@ -11,6 +11,8 @@ protocol TextTranslating: Sendable {
 }
 
 protocol TranslationModelInventorying: Sendable {
+    func installedTargetLanguages(from source: Language) async -> [Language]
+
     func resourceStatus(
         from source: Language,
         to target: Language

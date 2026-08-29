@@ -25,7 +25,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
                   identifier.caseInsensitiveCompare("und") != .orderedSame else {
                 return nil
             }
-            return Language(identifier: identifier)
+            return Language(identifier: identifier).baseLanguage
         }
 
         return Array(Set(languages)).sorted {

@@ -41,6 +41,10 @@ actor VoiceTranslationPipeline {
         await modelInventory.resourceStatus(from: source, to: target)
     }
 
+    func installedTranslationTargets(from source: Language) async -> [Language] {
+        await modelInventory.installedTargetLanguages(from: source)
+    }
+
     /// Translates app-provided copy with the same installed, offline provider.
     func translateText(
         _ text: String,

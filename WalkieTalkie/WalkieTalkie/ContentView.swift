@@ -4,6 +4,7 @@ struct ContentView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var viewModel = TranscriptionViewModel()
     @State private var isSourceMicrophoneHeld = false
+    @State private var isDownloadModelsAlertPresented = false
 
     private var isCompactLandscape: Bool {
         verticalSizeClass == .compact
@@ -86,6 +87,9 @@ struct ContentView: View {
         .onDisappear {
             viewModel.cancelCapture()
         }
+        .alert("Downloading models is coming soon", isPresented: $isDownloadModelsAlertPresented) {
+            Button("OK", role: .cancel) {}
+        }
     }
 
     private func languagePanel(
@@ -149,11 +153,13 @@ struct ContentView: View {
         selection: Language?,
         tint: Color
     ) -> some View {
-        Menu {
-            if viewModel.installedLanguages.isEmpty {
+        let languages = viewModel.languages(for: side)
+
+        return Menu {
+            if languages.isEmpty {
                 Text("No installed languages")
             } else {
-                ForEach(viewModel.installedLanguages) { language in
+                ForEach(languages) { language in
                     Button {
                         viewModel.select(language, for: side)
                     } label: {
@@ -164,6 +170,14 @@ struct ContentView: View {
                         }
                     }
                 }
+            }
+
+            Divider()
+
+            Button {
+                isDownloadModelsAlertPresented = true
+            } label: {
+                Label("Download models for offline use", systemImage: "arrow.down.circle")
             }
         } label: {
             VStack(spacing: isCompactLandscape ? 2 : 5) {

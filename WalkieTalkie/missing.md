@@ -45,6 +45,7 @@ Missing:
 - A Languages or resource-management screen.
 - Speech asset download/preparation initiated by the UI.
 - Translation model download using the Apple-controlled `translationTask`/`prepareTranslation()` lifecycle.
+- Replace the current "Downloading models is coming soon" placeholder alert with that download flow.
 - Download confirmation, progress, failure, retry, and storage-error states.
 - Speech asset reservation and release management within the installed-locale limit.
 - A unified distinction between transcription-ready, translation-ready, and fully-offline-ready.
@@ -112,7 +113,6 @@ The following planned extensions are not implemented:
 - `AppleTextTranslator.cancel()` is a no-op, so Translation work is not actively cancelled at the provider boundary.
 - A new `TranslationSession` is created for each translation rather than managed through a dedicated session/download coordinator.
 - The feature state has only idle, preparing, listening, and finishing states; it does not implement the plan's full conversation state machine.
-- The target language selector is limited to installed Speech languages even though the current target side only requires Translation. This unnecessarily reduces available translation targets.
 - Cancellation occurs on view disappearance, but interruption, route-change, backgrounding, language-change-during-work, and new-utterance behavior are not comprehensively coordinated.
 - There is no persistence layer, although this is acceptable until history/favorites are selected.
 - Accessibility identifiers and basic labels exist, but Dynamic Type, VoiceOver behavior, reduced motion, and iPad resizing still need explicit verification.
@@ -127,4 +127,3 @@ The core definition of done in `plan.md` remains unmet because:
 - Interruption and permission failures do not all provide complete recovery paths.
 - Feature state machines and provider contracts have no automated test coverage.
 - Accessibility has not been verified across supported iPhone and iPad layouts.
-
