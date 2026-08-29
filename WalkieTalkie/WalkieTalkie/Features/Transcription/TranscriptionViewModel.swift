@@ -239,60 +239,73 @@ final class TranscriptionViewModel {
     }
 
     private func startCapture(for role: LanguageRole) {
-        guard let source = language(for: role),
-              let target = language(for: role.opposite) else {
+        guard let captureSpokenLanguage = language(for: role),
+              let captureTranslatedToLanguage = language(for: role.opposite) else {
             modelStatusText = "Select two installed languages first."
             return
         }
-        guard source != target else {
+        guard captureSpokenLanguage != captureTranslatedToLanguage else {
             modelStatusText = "Spoken and translated-to languages must be different."
             return
         }
 
         state = .preparing
         activeMicrophoneRole = role
-        setText("Preparing \(source.displayName()) speech recognition…", for: role)
-        setText("Checking \(target.displayName()) translation model…", for: role.opposite)
+        setText(
+            "Preparing \(captureSpokenLanguage.displayName()) speech recognition…",
+            for: role
+        )
+        setText(
+            "Checking \(captureTranslatedToLanguage.displayName()) translation model…",
+            for: role.opposite
+        )
         let captureID = UUID()
         self.captureID = captureID
 
         transcriptionTask = Task {
             do {
-                guard await pipeline.speechResourceStatus(for: source) == .installed else {
-                    throw SpeechBackendError.resourceNotInstalled(source.identifier)
+                guard await pipeline.speechResourceStatus(
+                    for: captureSpokenLanguage
+                ) == .installed else {
+                    throw SpeechBackendError.resourceNotInstalled(
+                        captureSpokenLanguage.identifier
+                    )
                 }
 
                 let translationStatus = await pipeline.translationResourceStatus(
-                    from: source,
-                    to: target
+                    from: captureSpokenLanguage,
+                    to: captureTranslatedToLanguage
                 )
                 switch translationStatus {
                 case .installed:
-                    modelStatusText = "\(source.displayName()) → \(target.displayName()) is ready offline."
+                    modelStatusText = "\(captureSpokenLanguage.displayName()) → \(captureTranslatedToLanguage.displayName()) is ready offline."
                 case .downloadable:
                     throw TranslationBackendError.modelNotInstalled(
-                        source: source.displayName(),
-                        target: target.displayName()
+                        spokenLanguage: captureSpokenLanguage.displayName(),
+                        translatedToLanguage: captureTranslatedToLanguage.displayName()
                     )
                 case .unsupported:
                     throw TranslationBackendError.unsupportedPair(
-                        source: source.displayName(),
-                        target: target.displayName()
+                        spokenLanguage: captureSpokenLanguage.displayName(),
+                        translatedToLanguage: captureTranslatedToLanguage.displayName()
                     )
                 }
 
                 try Task.checkCancellation()
-                let results = try await pipeline.start(source: source, target: target)
+                let results = try await pipeline.start(
+                    spokenLanguage: captureSpokenLanguage,
+                    translatedToLanguage: captureTranslatedToLanguage
+                )
                 guard self.captureID == captureID else { return }
                 state = .listening
-                setText("Listening in \(source.displayName())…", for: role)
+                setText("Listening in \(captureSpokenLanguage.displayName())…", for: role)
                 setText(Self.translatedToPrompt, for: role.opposite)
 
                 for try await result in results {
                     try Task.checkCancellation()
                     guard self.captureID == captureID else { return }
-                    setText(result.sourceLanguageText, for: role)
-                    if let translation = result.targetLanguageText {
+                    setText(result.spokenLanguageText, for: role)
+                    if let translation = result.translatedToLanguageText {
                         setText(translation, for: role.opposite)
                     }
                 }
@@ -458,7 +471,7 @@ final class TranscriptionViewModel {
         for spoken: Language,
         preservingSelection: Bool
     ) async {
-        let forwardTargets = await pipeline.installedTranslationTargets(from: spoken)
+        let forwardTargets = await pipeline.installedTranslatedToLanguages(from: spoken)
         var translatedToLanguages: [Language] = []
         for translatedTo in forwardTargets where installedSpokenLanguages.contains(translatedTo) {
             guard !Task.isCancelled else { return }

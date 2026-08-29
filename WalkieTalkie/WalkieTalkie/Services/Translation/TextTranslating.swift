@@ -3,32 +3,32 @@ import Foundation
 protocol TextTranslating: Sendable {
     func translate(
         _ text: String,
-        from source: Language,
-        to target: Language
+        from spokenLanguage: Language,
+        to translatedToLanguage: Language
     ) async throws -> String
 
     func cancel() async
 }
 
 protocol TranslationModelInventorying: Sendable {
-    func installedTargetLanguages(from source: Language) async -> [Language]
+    func installedTranslatedToLanguages(from spokenLanguage: Language) async -> [Language]
 
     func resourceStatus(
-        from source: Language,
-        to target: Language
+        from spokenLanguage: Language,
+        to translatedToLanguage: Language
     ) async -> TranslationResourceStatus
 }
 
 nonisolated enum TranslationBackendError: LocalizedError, Sendable {
-    case unsupportedPair(source: String, target: String)
-    case modelNotInstalled(source: String, target: String)
+    case unsupportedPair(spokenLanguage: String, translatedToLanguage: String)
+    case modelNotInstalled(spokenLanguage: String, translatedToLanguage: String)
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedPair(let source, let target):
-            "Translation from \(source) to \(target) is not supported."
-        case .modelNotInstalled(let source, let target):
-            "The offline translation model from \(source) to \(target) is not installed."
+        case .unsupportedPair(let spokenLanguage, let translatedToLanguage):
+            "Translation from \(spokenLanguage) to \(translatedToLanguage) is not supported."
+        case .modelNotInstalled(let spokenLanguage, let translatedToLanguage):
+            "The offline translation model from \(spokenLanguage) to \(translatedToLanguage) is not installed."
         }
     }
 }

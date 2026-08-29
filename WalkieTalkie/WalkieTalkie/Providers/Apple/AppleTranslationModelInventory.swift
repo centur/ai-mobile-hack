@@ -6,18 +6,25 @@ import Foundation
 /// `Speech.AssetInventory` cannot report translation assets. Translation exposes
 /// installed model pairs through `LanguageAvailability` instead.
 nonisolated struct AppleTranslationModelInventory: TranslationModelInventorying {
-    nonisolated func installedTargetLanguages(from source: Language) async -> [Language] {
+    nonisolated func installedTranslatedToLanguages(
+        from spokenLanguage: Language
+    ) async -> [Language] {
         let availability = LanguageAvailability(preferredStrategy: .lowLatency)
-        let sourceLanguage = Locale.Language(identifier: source.identifier)
+        let spokenLocaleLanguage = Locale.Language(identifier: spokenLanguage.identifier)
         let supportedLanguages = await availability.supportedLanguages
         var installed: Set<Language> = []
 
-        for targetLanguage in supportedLanguages {
-            let target = Language(identifier: targetLanguage.minimalIdentifier).baseLanguage
-            guard target != source.baseLanguage else { continue }
+        for translatedToLocaleLanguage in supportedLanguages {
+            let translatedToLanguage = Language(
+                identifier: translatedToLocaleLanguage.minimalIdentifier
+            ).baseLanguage
+            guard translatedToLanguage != spokenLanguage.baseLanguage else { continue }
 
-            if await availability.status(from: sourceLanguage, to: targetLanguage) == .installed {
-                installed.insert(target)
+            if await availability.status(
+                from: spokenLocaleLanguage,
+                to: translatedToLocaleLanguage
+            ) == .installed {
+                installed.insert(translatedToLanguage)
             }
         }
 
@@ -27,13 +34,13 @@ nonisolated struct AppleTranslationModelInventory: TranslationModelInventorying 
     }
 
     nonisolated func resourceStatus(
-        from source: Language,
-        to target: Language
+        from spokenLanguage: Language,
+        to translatedToLanguage: Language
     ) async -> TranslationResourceStatus {
         let availability = LanguageAvailability(preferredStrategy: .lowLatency)
         let status = await availability.status(
-            from: Locale.Language(identifier: source.identifier),
-            to: Locale.Language(identifier: target.identifier)
+            from: Locale.Language(identifier: spokenLanguage.identifier),
+            to: Locale.Language(identifier: translatedToLanguage.identifier)
         )
 
         switch status {

@@ -35,11 +35,11 @@ Missing:
 
 ## Phase 2 — Offline language resources
 
-Implemented: queries for Speech asset status and Translation pair availability; a bottom-language Speech model-management sheet combining `SpeechTranscriber` with `DictationTranscriber` fallback coverage; Speech asset download/preparation; per-model operation state and errors; and app reservation release for installed Speech assets.
+Implemented: queries for Speech asset status and Translation pair availability; a spoken-language Speech model-management sheet combining `SpeechTranscriber` with `DictationTranscriber` fallback coverage; Speech asset download/preparation; per-model operation state and errors; and app reservation release for installed Speech assets.
 
 Missing:
 
-- Top-language model selection and resource-management UI; its selector currently reports "Not implemented."
+- Translated-to-language model selection and resource-management UI; its selector currently reports "Not implemented."
 - Translation model download using the Apple-controlled `translationTask`/`prepareTranslation()` lifecycle.
 - Translation download confirmation, progress, failure, retry, and storage-error states.
 - Speech download byte/progress reporting where Apple exposes it, plus explicit UI for the installed-locale limit.

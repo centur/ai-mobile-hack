@@ -1,8 +1,8 @@
 import Foundation
 
-/// One pipeline update containing the source transcript and its translation.
+/// One pipeline update containing spoken text and its translation.
 nonisolated struct VoiceTranslationResult: Equatable, Sendable {
-    let sourceLanguageText: String
-    let targetLanguageText: String?
+    let spokenLanguageText: String
+    let translatedToLanguageText: String?
     let isFinal: Bool
 }

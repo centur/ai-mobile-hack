@@ -39,61 +39,74 @@ actor VoiceTranslationPipeline {
     }
 
     func translationResourceStatus(
-        from source: Language,
-        to target: Language
+        from spokenLanguage: Language,
+        to translatedToLanguage: Language
     ) async -> TranslationResourceStatus {
-        await modelInventory.resourceStatus(from: source, to: target)
+        await modelInventory.resourceStatus(
+            from: spokenLanguage,
+            to: translatedToLanguage
+        )
     }
 
-    func installedTranslationTargets(from source: Language) async -> [Language] {
-        await modelInventory.installedTargetLanguages(from: source)
+    func installedTranslatedToLanguages(from spokenLanguage: Language) async -> [Language] {
+        await modelInventory.installedTranslatedToLanguages(from: spokenLanguage)
     }
 
     /// Translates app-provided copy with the same installed, offline provider.
     func translateText(
         _ text: String,
-        from source: Language,
-        to target: Language
+        from spokenLanguage: Language,
+        to translatedToLanguage: Language
     ) async throws -> String {
-        guard source != target else { return text }
+        guard spokenLanguage != translatedToLanguage else { return text }
 
-        switch await modelInventory.resourceStatus(from: source, to: target) {
+        switch await modelInventory.resourceStatus(
+            from: spokenLanguage,
+            to: translatedToLanguage
+        ) {
         case .installed:
-            return try await translator.translate(text, from: source, to: target)
+            return try await translator.translate(
+                text,
+                from: spokenLanguage,
+                to: translatedToLanguage
+            )
         case .downloadable:
             throw TranslationBackendError.modelNotInstalled(
-                source: source.displayName(),
-                target: target.displayName()
+                spokenLanguage: spokenLanguage.displayName(),
+                translatedToLanguage: translatedToLanguage.displayName()
             )
         case .unsupported:
             throw TranslationBackendError.unsupportedPair(
-                source: source.displayName(),
-                target: target.displayName()
+                spokenLanguage: spokenLanguage.displayName(),
+                translatedToLanguage: translatedToLanguage.displayName()
             )
         }
     }
 
     func start(
-        source: Language,
-        target: Language
+        spokenLanguage: Language,
+        translatedToLanguage: Language
     ) async throws -> AsyncThrowingStream<VoiceTranslationResult, Error> {
-        let status = await modelInventory.resourceStatus(from: source, to: target)
+        let status = await modelInventory.resourceStatus(
+            from: spokenLanguage,
+            to: translatedToLanguage
+        )
         switch status {
         case .installed:
             break
         case .downloadable:
             throw TranslationBackendError.modelNotInstalled(
-                source: source.displayName(),
-                target: target.displayName()
+                spokenLanguage: spokenLanguage.displayName(),
+                translatedToLanguage: translatedToLanguage.displayName()
             )
         case .unsupported:
             throw TranslationBackendError.unsupportedPair(
-                source: source.displayName(),
-                target: target.displayName()
+                spokenLanguage: spokenLanguage.displayName(),
+                translatedToLanguage: translatedToLanguage.displayName()
             )
         }
 
-        let transcriptResults = try await speechConverter.start(language: source)
+        let transcriptResults = try await speechConverter.start(language: spokenLanguage)
         let (results, continuation) = AsyncThrowingStream<VoiceTranslationResult, Error>.makeStream(
             bufferingPolicy: .bufferingNewest(50)
         )
@@ -107,21 +120,21 @@ actor VoiceTranslationPipeline {
                     if segment.isFinal {
                         let translated = try await translator.translate(
                             original,
-                            from: source,
-                            to: target
+                            from: spokenLanguage,
+                            to: translatedToLanguage
                         )
                         continuation.yield(
                             VoiceTranslationResult(
-                                sourceLanguageText: original,
-                                targetLanguageText: translated,
+                                spokenLanguageText: original,
+                                translatedToLanguageText: translated,
                                 isFinal: true
                             )
                         )
                     } else {
                         continuation.yield(
                             VoiceTranslationResult(
-                                sourceLanguageText: original,
-                                targetLanguageText: nil,
+                                spokenLanguageText: original,
+                                translatedToLanguageText: nil,
                                 isFinal: false
                             )
                         )
