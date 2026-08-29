@@ -111,7 +111,7 @@ struct ContentView: View {
                         size: role == .translatedTo
                             ? (isCompactLandscape ? 36 : 52)
                             : (isCompactLandscape ? 24 : 34),
-                        weight: role == .translatedTo ? .black : .bold,
+                        weight: role == .translatedTo ? .black : .regular,
                         design: .rounded
                     )
                 )

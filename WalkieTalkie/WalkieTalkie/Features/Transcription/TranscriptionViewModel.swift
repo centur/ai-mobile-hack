@@ -300,16 +300,6 @@ final class TranscriptionViewModel {
 
         state = .preparing
         activeMicrophoneRole = role
-        setText(
-            "Preparing \(captureSpokenLanguage.displayName()) speech recognition…",
-            for: role
-        )
-        if let captureTranslatedToLanguage {
-            setText(
-                "Checking \(captureTranslatedToLanguage.displayName()) translation model…",
-                for: role.opposite
-            )
-        }
         let captureID = UUID()
         self.captureID = captureID
 
@@ -339,11 +329,6 @@ final class TranscriptionViewModel {
                 )
                 guard self.captureID == captureID else { return }
                 state = .listening
-                modelStatusText = "Listening in \(captureSpokenLanguage.displayName())…"
-                setText("Listening in \(captureSpokenLanguage.displayName())…", for: role)
-                if translationLanguage != nil {
-                    setText(Self.translatedToPrompt, for: role.opposite)
-                }
 
                 for try await result in results {
                     try Task.checkCancellation()
