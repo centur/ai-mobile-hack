@@ -18,13 +18,14 @@ Apple's frameworks are the initial providers. Application features must depend o
 
 ## 2. Current Project State
 
-- `WalkieTalkie` now has one microphone button plus separate original-transcript and Indonesian-translation labels.
+- `WalkieTalkie` now has a landscape-only, two-panel conversation UI with fixed roles: the orange bottom panel is always the speech source and owns the microphone, while the blue top panel is always the translation target. The blue target panel occupies 5/8 of the available height; both panels have installed-language selectors.
+- The orange source prompt is dynamically translated from English into the selected source language when that offline Translation model is installed, with an English fallback when it is unavailable.
 - Deployment target is iOS 26.5; the local toolchain is Xcode 26.6 with an iOS 26.5 simulator runtime.
 - The app targets iPhone and iPad.
 - The project now compiles in Swift 6 mode and includes a microphone privacy usage description.
 - The first speech backend slice is implemented: provider-neutral audio/transcript contracts, Apple microphone capture, on-device `SpeechAnalyzer`/`SpeechTranscriber`, Speech asset status/download preparation, format conversion, finalization, and cancellation.
 - The UI prepares the preferred supported language, starts/stops capture, renders partial/final transcript results, reports setup/errors in the same label, and cancels capture when dismissed.
-- The provider-neutral voice pipeline now emits original and translated text together. Apple Translation model availability is checked on device through `LanguageAvailability`; the demo target is fixed to Indonesian (`id`) and final transcripts are translated only when that offline model pair is installed.
+- The provider-neutral voice pipeline emits original and translated text together. The UI discovers locally installed Speech assets, defaults the orange source panel to the device's preferred installed language, prefers Indonesian (`id`) as the blue target when it differs, and checks the selected Translation pair through `LanguageAvailability`; final transcripts are translated only when that direction's offline model is installed.
 - Physical-device speech/translation verification, Translation model download UX, interruption/route handling, test targets, synthesis, and persistence remain pending.
 
 ## 3. Product Scope

@@ -21,6 +21,22 @@ actor VoiceTranslationPipeline {
         await speechConverter.supportedLanguages()
     }
 
+    /// Languages whose Speech assets are already installed on this device.
+    func installedSpeechLanguages() async -> [Language] {
+        let supported = await speechConverter.supportedLanguages()
+        var installed: [Language] = []
+
+        for language in supported {
+            if await speechConverter.resourceStatus(for: language) == .installed {
+                installed.append(language)
+            }
+        }
+
+        return installed.sorted {
+            $0.displayName().localizedCaseInsensitiveCompare($1.displayName()) == .orderedAscending
+        }
+    }
+
     func speechResourceStatus(for language: Language) async -> SpeechResourceStatus {
         await speechConverter.resourceStatus(for: language)
     }
@@ -34,6 +50,30 @@ actor VoiceTranslationPipeline {
         to target: Language
     ) async -> TranslationResourceStatus {
         await modelInventory.resourceStatus(from: source, to: target)
+    }
+
+    /// Translates app-provided copy with the same installed, offline provider.
+    func translateText(
+        _ text: String,
+        from source: Language,
+        to target: Language
+    ) async throws -> String {
+        guard source != target else { return text }
+
+        switch await modelInventory.resourceStatus(from: source, to: target) {
+        case .installed:
+            return try await translator.translate(text, from: source, to: target)
+        case .downloadable:
+            throw TranslationBackendError.modelNotInstalled(
+                source: source.displayName(),
+                target: target.displayName()
+            )
+        case .unsupported:
+            throw TranslationBackendError.unsupportedPair(
+                source: source.displayName(),
+                target: target.displayName()
+            )
+        }
     }
 
     func start(
