@@ -10,6 +10,17 @@ actor VoiceTranslationPipeline {
         var end: TimeInterval { start + duration }
     }
 
+    private struct TranslationPart: Sendable {
+        let start: TimeInterval
+        let duration: TimeInterval
+        let sourceText: String
+        let translatedText: String
+
+        var timing: TranscriptPart {
+            TranscriptPart(start: start, duration: duration, text: translatedText)
+        }
+    }
+
     private let speechConverter: SpeechToTextConverter
     private let translator: any TextTranslating
     private let modelInventory: any TranslationModelInventorying
@@ -21,6 +32,7 @@ actor VoiceTranslationPipeline {
     private var accumulatedSpokenText = ""
     private var previousTranscriptText = ""
     private var transcriptParts: [TranscriptPart] = []
+    private var translationParts: [TranslationPart] = []
 
     init(
         speechConverter: SpeechToTextConverter,
@@ -142,6 +154,7 @@ actor VoiceTranslationPipeline {
         accumulatedSpokenText = ""
         previousTranscriptText = ""
         transcriptParts = []
+        translationParts = []
         silenceTask?.cancel()
         silenceTask = nil
 
@@ -166,6 +179,7 @@ actor VoiceTranslationPipeline {
                     if segment.isFinal {
                         await translateLatestTranscript(
                             original,
+                            segment: segment,
                             from: spokenLanguage,
                             to: translatedToLanguage,
                             continuation: continuation
@@ -173,6 +187,7 @@ actor VoiceTranslationPipeline {
                     } else {
                         scheduleTranslationAfterSilence(
                             original,
+                            segment: segment,
                             from: spokenLanguage,
                             to: translatedToLanguage,
                             silenceDuration: silenceDuration,
@@ -223,6 +238,7 @@ actor VoiceTranslationPipeline {
 
     private func scheduleTranslationAfterSilence(
         _ text: String,
+        segment: TranscriptSegment,
         from spokenLanguage: Language,
         to translatedToLanguage: Language,
         silenceDuration: Duration,
@@ -234,6 +250,7 @@ actor VoiceTranslationPipeline {
                 guard !Task.isCancelled else { return }
                 await self?.translateLatestTranscript(
                     text,
+                    segment: segment,
                     from: spokenLanguage,
                     to: translatedToLanguage,
                     continuation: continuation
@@ -248,25 +265,24 @@ actor VoiceTranslationPipeline {
 
     private func translateLatestTranscript(
         _ text: String,
+        segment: TranscriptSegment,
         from spokenLanguage: Language,
         to translatedToLanguage: Language,
         continuation: AsyncThrowingStream<VoiceTranslationResult, Error>.Continuation
     ) async {
-        guard latestTranscriptText == text, lastTranslatedText != text else { return }
-        let untranslatedRemainder: String
-        if !lastTranslatedText.isEmpty, text.hasPrefix(lastTranslatedText) {
-            untranslatedRemainder = String(text.dropFirst(lastTranslatedText.count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            untranslatedRemainder = text
-        }
-        guard !untranslatedRemainder.isEmpty else {
-            lastTranslatedText = text
+        guard latestTranscriptText == text else { return }
+        if let start = segment.startTime {
+            if translationParts.contains(where: {
+                abs($0.start - start) < 0.15 && $0.sourceText == text
+            }) {
+                return
+            }
+        } else if lastTranslatedText == text {
             return
         }
 
         let translated = try? await translator.translate(
-            untranslatedRemainder,
+            text,
             from: spokenLanguage,
             to: translatedToLanguage
         )
@@ -275,10 +291,7 @@ actor VoiceTranslationPipeline {
               lastTranslatedText != text,
               let translated else { return }
 
-        lastTranslatedText = text
-        accumulatedTranslatedText = accumulatedTranslatedText.isEmpty
-            ? translated
-            : "\(accumulatedTranslatedText)\n\(translated)"
+        mergeTranslatedText(translated, sourceText: text, segment: segment)
         continuation.yield(
             VoiceTranslationResult(
                 spokenLanguageText: accumulatedSpokenText,
@@ -286,6 +299,44 @@ actor VoiceTranslationPipeline {
                 isFinal: true
             )
         )
+    }
+
+    private func mergeTranslatedText(
+        _ translatedText: String,
+        sourceText: String,
+        segment: TranscriptSegment
+    ) {
+        defer { lastTranslatedText = sourceText }
+
+        if let start = segment.startTime,
+           let duration = segment.duration,
+           start.isFinite,
+           duration.isFinite {
+            let newPart = TranslationPart(
+                start: start,
+                duration: max(duration, 0),
+                sourceText: sourceText,
+                translatedText: translatedText
+            )
+            translationParts.removeAll {
+                representsSameAudio($0.timing, newPart.timing)
+            }
+            translationParts.append(newPart)
+            translationParts.sort { $0.start < $1.start }
+            accumulatedTranslatedText = translationParts
+                .map(\.translatedText)
+                .joined(separator: "\n")
+            return
+        }
+
+        if accumulatedTranslatedText.isEmpty {
+            accumulatedTranslatedText = translatedText
+        } else if sourceText.hasPrefix(lastTranslatedText)
+                    || lastTranslatedText.hasPrefix(sourceText) {
+            accumulatedTranslatedText = translatedText
+        } else {
+            accumulatedTranslatedText += "\n" + translatedText
+        }
     }
 
     private func accumulateSpokenText(

@@ -675,8 +675,8 @@ final class TranscriptionViewModel {
 
     private func clearPanelsForStoppedSourceCapture() {
         suppressedCaptureID = captureID
-        spokenLanguageText = ""
-        translatedToLanguageText = ""
+        spokenLanguageText = Self.spokenPrompt
+        translatedToLanguageText = Self.translatedToPrompt
     }
 
     private func language(for role: LanguageRole) -> Language? {
