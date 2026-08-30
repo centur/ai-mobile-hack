@@ -2,6 +2,14 @@ import Foundation
 
 /// Converts microphone audio into two pipeline values: original and translated text.
 actor VoiceTranslationPipeline {
+    private struct TranscriptPart: Sendable {
+        let start: TimeInterval
+        let duration: TimeInterval
+        let text: String
+
+        var end: TimeInterval { start + duration }
+    }
+
     private let speechConverter: SpeechToTextConverter
     private let translator: any TextTranslating
     private let modelInventory: any TranslationModelInventorying
@@ -12,6 +20,7 @@ actor VoiceTranslationPipeline {
     private var accumulatedTranslatedText = ""
     private var accumulatedSpokenText = ""
     private var previousTranscriptText = ""
+    private var transcriptParts: [TranscriptPart] = []
 
     init(
         speechConverter: SpeechToTextConverter,
@@ -132,6 +141,7 @@ actor VoiceTranslationPipeline {
         accumulatedTranslatedText = ""
         accumulatedSpokenText = ""
         previousTranscriptText = ""
+        transcriptParts = []
         silenceTask?.cancel()
         silenceTask = nil
 
@@ -142,7 +152,7 @@ actor VoiceTranslationPipeline {
                     guard !original.isEmpty else { continue }
                     latestTranscriptText = original
                     silenceTask?.cancel()
-                    accumulateSpokenText(original)
+                    accumulateSpokenText(original, segment: segment)
 
                     continuation.yield(
                         VoiceTranslationResult(
@@ -278,7 +288,32 @@ actor VoiceTranslationPipeline {
         )
     }
 
-    private func accumulateSpokenText(_ text: String) {
+    private func accumulateSpokenText(
+        _ text: String,
+        segment: TranscriptSegment
+    ) {
+        if let start = segment.startTime,
+           let duration = segment.duration,
+           start.isFinite,
+           duration.isFinite {
+            let newPart = TranscriptPart(
+                start: start,
+                duration: max(duration, 0),
+                text: text
+            )
+
+            transcriptParts.removeAll { existingPart in
+                representsSameAudio(existingPart, newPart)
+            }
+            transcriptParts.append(newPart)
+            transcriptParts.sort { $0.start < $1.start }
+            accumulatedSpokenText = transcriptParts
+                .map(\.text)
+                .joined(separator: "\n")
+            previousTranscriptText = text
+            return
+        }
+
         guard !previousTranscriptText.isEmpty else {
             accumulatedSpokenText = text
             previousTranscriptText = text
@@ -298,5 +333,18 @@ actor VoiceTranslationPipeline {
             accumulatedSpokenText.append(text)
         }
         previousTranscriptText = text
+    }
+
+    private func representsSameAudio(
+        _ first: TranscriptPart,
+        _ second: TranscriptPart
+    ) -> Bool {
+        if abs(first.start - second.start) < 0.15 {
+            return true
+        }
+
+        let overlap = max(0, min(first.end, second.end) - max(first.start, second.start))
+        let shorterDuration = min(first.duration, second.duration)
+        return shorterDuration > 0 && overlap / shorterDuration >= 0.8
     }
 }

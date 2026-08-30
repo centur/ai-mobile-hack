@@ -148,6 +148,14 @@ struct ContentView: View {
             let languages = viewModel.languages(for: role)
 
             Menu {
+                Button {
+                    isTranslationModelManagerPresented = true
+                } label: {
+                    Label("Download more languages", systemImage: "arrow.down.circle")
+                }
+
+                Divider()
+
                 if languages.isEmpty {
                     Text("No supported languages")
                 } else {
@@ -163,17 +171,10 @@ struct ContentView: View {
                         }
                     }
                 }
-
-                Divider()
-
-                Button {
-                    isTranslationModelManagerPresented = true
-                } label: {
-                    Label("Download models for offline use", systemImage: "arrow.down.circle")
-                }
             } label: {
                 languageMenuLabel(selection: selection, tint: tint)
             }
+            .menuOrder(.fixed)
             .disabled(
                 viewModel.state != .idle
                     || viewModel.isLoadingLanguages
@@ -186,6 +187,14 @@ struct ContentView: View {
             let languages = viewModel.languages(for: role)
 
             Menu {
+                Button {
+                    isSpeechModelManagerPresented = true
+                } label: {
+                    Label("Download more languages", systemImage: "arrow.down.circle")
+                }
+
+                Divider()
+
                 if languages.isEmpty {
                     Text("No installed languages")
                 } else {
@@ -200,14 +209,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                }
-
-                Divider()
-
-                Button {
-                    isSpeechModelManagerPresented = true
-                } label: {
-                    Label("Download models for offline use", systemImage: "arrow.down.circle")
                 }
 
                 Divider()
@@ -236,6 +237,7 @@ struct ContentView: View {
             } label: {
                 languageMenuLabel(selection: selection, tint: tint)
             }
+            .menuOrder(.fixed)
             .disabled(viewModel.state != .idle || viewModel.isLoadingLanguages)
             .accessibilityLabel("Select spoken language")
             .accessibilityValue(selection?.displayName() ?? "No language selected")

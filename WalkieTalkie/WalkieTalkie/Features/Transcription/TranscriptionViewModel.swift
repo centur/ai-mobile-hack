@@ -8,6 +8,10 @@ final class TranscriptionViewModel {
     private static let translatedToPrompt = "Translation will appear here."
     private static let english = Language(identifier: "en")
     private static let silenceDurationKey = "translationSilenceDurationSeconds"
+    private static let sentenceTerminators: Set<Character> = [
+        ".", "!", "?", "…", "。", "！", "？", "؟", "।", "॥"
+    ]
+    private static let trailingClausePunctuation: Set<Character> = [",", ";", ":"]
 
     nonisolated enum LanguageRole: Equatable, Sendable {
         case translatedTo
@@ -25,6 +29,7 @@ final class TranscriptionViewModel {
     private var transcriptionTask: Task<Void, Never>?
     private var captureTransitionTask: Task<Void, Never>?
     private var captureID: UUID?
+    private var suppressedCaptureID: UUID?
     private var languageSelectionTask: Task<Void, Never>?
     private var hasLoadedLanguages = false
 
@@ -295,12 +300,18 @@ final class TranscriptionViewModel {
         case .idle:
             startCapture(for: role)
         case .preparing:
+            if activeMicrophoneRole == .spoken {
+                clearPanelsForStoppedSourceCapture()
+            }
             if activeMicrophoneRole == role {
                 cancelCapture()
             } else {
                 switchCapture(to: role, finalizingCurrentCapture: false)
             }
         case .listening:
+            if activeMicrophoneRole == .spoken {
+                clearPanelsForStoppedSourceCapture()
+            }
             if activeMicrophoneRole == role {
                 finishCapture()
             } else {
@@ -317,6 +328,7 @@ final class TranscriptionViewModel {
         captureID = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        suppressedCaptureID = nil
         activeMicrophoneRole = nil
         state = .idle
 
@@ -411,6 +423,7 @@ final class TranscriptionViewModel {
                 for try await result in results {
                     try Task.checkCancellation()
                     guard self.captureID == captureID else { return }
+                    guard suppressedCaptureID != captureID else { continue }
                     setText(result.spokenLanguageText, for: role)
                     if let translation = result.translatedToLanguageText {
                         setText(translation, for: role.opposite)
@@ -420,17 +433,27 @@ final class TranscriptionViewModel {
                 guard self.captureID == captureID else { return }
                 state = .idle
                 activeMicrophoneRole = nil
+                if suppressedCaptureID == captureID {
+                    suppressedCaptureID = nil
+                }
                 self.captureID = nil
                 transcriptionTask = nil
             } catch is CancellationError {
                 guard self.captureID == captureID else { return }
                 state = .idle
                 activeMicrophoneRole = nil
+                if suppressedCaptureID == captureID {
+                    suppressedCaptureID = nil
+                }
                 self.captureID = nil
                 transcriptionTask = nil
             } catch {
                 guard self.captureID == captureID else { return }
-                setText(error.localizedDescription, for: role)
+                if suppressedCaptureID != captureID {
+                    setText(error.localizedDescription, for: role)
+                } else {
+                    suppressedCaptureID = nil
+                }
                 modelStatusText = error.localizedDescription
                 state = .idle
                 activeMicrophoneRole = nil
@@ -469,6 +492,7 @@ final class TranscriptionViewModel {
             await previousTask?.value
             guard !Task.isCancelled else { return }
 
+            suppressedCaptureID = nil
             state = .idle
             captureTransitionTask = nil
             startCapture(for: role)
@@ -649,16 +673,40 @@ final class TranscriptionViewModel {
         translatedToLanguageText = Self.translatedToPrompt
     }
 
+    private func clearPanelsForStoppedSourceCapture() {
+        suppressedCaptureID = captureID
+        spokenLanguageText = ""
+        translatedToLanguageText = ""
+    }
+
     private func language(for role: LanguageRole) -> Language? {
         role == .translatedTo ? translatedToLanguage : spokenLanguage
     }
 
     private func setText(_ text: String, for role: LanguageRole) {
+        let renderedText = punctuatedForDisplay(text)
         if role == .translatedTo {
-            translatedToLanguageText = text
+            translatedToLanguageText = renderedText
         } else {
-            spokenLanguageText = text
+            spokenLanguageText = renderedText
         }
+    }
+
+    private func punctuatedForDisplay(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { rawLine in
+                var line = String(rawLine)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let lastCharacter = line.last else { return "" }
+                if Self.sentenceTerminators.contains(lastCharacter) {
+                    return line
+                }
+                if Self.trailingClausePunctuation.contains(lastCharacter) {
+                    line.removeLast()
+                }
+                return line + "."
+            }
+            .joined(separator: "\n")
     }
 
     private func reloadInstalledTranslatedToLanguages(

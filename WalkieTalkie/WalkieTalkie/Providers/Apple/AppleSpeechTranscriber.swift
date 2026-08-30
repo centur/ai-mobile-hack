@@ -391,7 +391,9 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         TranscriptSegment(
             text: String(result.text.characters),
             isFinal: result.isFinal,
-            alternatives: result.alternatives.map { String($0.characters) }
+            alternatives: result.alternatives.map { String($0.characters) },
+            startTime: Self.seconds(result.range.start),
+            duration: Self.seconds(result.range.duration)
         )
     }
 
@@ -401,8 +403,15 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         TranscriptSegment(
             text: String(result.text.characters),
             isFinal: result.isFinal,
-            alternatives: result.alternatives.map { String($0.characters) }
+            alternatives: result.alternatives.map { String($0.characters) },
+            startTime: Self.seconds(result.range.start),
+            duration: Self.seconds(result.range.duration)
         )
+    }
+
+    private nonisolated static func seconds(_ time: CMTime) -> TimeInterval? {
+        let value = time.seconds
+        return value.isFinite ? value : nil
     }
 
     private nonisolated static func baseLanguage(for locale: Locale) -> Language? {
